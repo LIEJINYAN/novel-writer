@@ -1,0 +1,330 @@
+# Phase 3 第一批：AI 基础设施与续写功能 - 实现计划
+
+## [x] Task 1: 安装依赖与项目配置
+- **Priority**: high
+- **Depends On**: None
+- **Description**: 
+  - 在 requirements.txt 添加 `openai>=1.0` 和 `httpx>=0.27`
+  - 安装新依赖
+  - 在 .env.example 中添加 AI 相关环境变量示例
+- **Acceptance Criteria Addressed**: AC-1, AC-2, AC-4, AC-5
+- **Test Requirements**:
+  - `programmatic` TR-1.1: `import openai` 和 `import httpx` 均成功
+  - `programmatic` TR-1.2: requirements.txt 包含 openai 和 httpx
+- **Notes**: 使用 venv 中的 pip 安装
+
+## [x] Task 2: AI Provider 抽象层
+- **Priority**: high
+- **Depends On**: Task 1
+- **Description**: 
+  - 创建 `core/ai/base.py`，定义核心数据结构：
+    - `Message`：dataclass，含 role（system/user/assistant）、content
+    - `AIConfig`：dataclass，含 model、temperature、max_tokens、stream、api_key、api_base
+    - `AIResponse`：dataclass，含 content、usage（prompt_tokens/completion_tokens/total_tokens）、model
+  - 定义 `BaseAIProvider` 抽象基类：
+    - `chat(messages: list[Message], config: AIConfig) -> AIResponse`
+    - `chat_stream(messages: list[Message], config: AIConfig) -> Generator[str]`
+    - `test_connection(api_key: str, api_base: str) -> bool`
+    - `list_models(api_key: str, api_base: str) -> list[str]`
+    - 属性：`name`、`display_name`、`default_api_base`、`default_models`
+  - 定义 `AIProviderError` 异常类层级
+- **Acceptance Criteria Addressed**: AC-1
+- **Test Requirements**:
+  - `programmatic` TR-2.1: `BaseAIProvider` 是 ABC，不能直接实例化
+  - `programmatic` TR-2.2: `Message(role="user", content="hello")` 创建成功
+  - `programmatic` TR-2.3: `AIConfig(model="gpt-4o", temperature=0.8)` 创建成功
+  - `programmatic` TR-2.4: `AIResponse` 含 content 和 usage 属性
+- **Notes**: 数据结构用 dataclass，简洁高效
+
+## [x] Task 3: OpenAI 适配器
+- **Priority**: high
+- **Depends On**: Task 2
+- **Description**: 
+  - 创建 `core/ai/providers/openai_provider.py`
+  - 继承 `BaseAIProvider`
+  - 使用 `openai` Python SDK（>=1.0 新版 API）
+  - 实现 `chat()`：调用 `OpenAI().chat.completions.create()`
+  - 实现 `chat_stream()`：stream=True，yield 每个 chunk 的 delta.content
+  - 实现 `test_connection()`：调用 `client.models.list()` 验证
+  - 实现 `list_models()`：返回可用模型 ID 列表
+  - 支持 api_base 自定义（兼容第三方接口）
+  - 错误处理：捕获 openai.APIError、openai.AuthenticationError 等
+- **Acceptance Criteria Addressed**: AC-2
+- **Test Requirements**:
+  - `programmatic` TR-3.1: `OpenAIProvider` 继承 `BaseAIProvider`
+  - `programmatic` TR-3.2: `name` 属性为 `"openai"`，`display_name` 为 `"OpenAI"`
+  - `programmatic` TR-3.3: `default_models` 包含 `gpt-4o`、`gpt-4o-mini`
+  - `programmatic` TR-3.4: `test_connection` 在无 API Key 时抛出异常
+- **Notes**: openai SDK 1.0+ 用法：`from openai import OpenAI; client = OpenAI(api_key=...)`
+
+## [x] Task 4: DeepSeek 适配器
+- **Priority**: high
+- **Depends On**: Task 3
+- **Description**: 
+  - 创建 `core/ai/providers/deepseek_provider.py`
+  - 继承 `OpenAIProvider`（复用 OpenAI SDK，DeepSeek 兼容 OpenAI 接口）
+  - 覆盖 `name`、`display_name`、`default_api_base`、`default_models`
+  - `default_api_base = "https://api.deepseek.com/v1"`
+  - `default_models = ["deepseek-chat", "deepseek-reasoner"]`
+- **Acceptance Criteria Addressed**: AC-4
+- **Test Requirements**:
+  - `programmatic` TR-4.1: `DeepSeekProvider` 继承 `OpenAIProvider`
+  - `programmatic` TR-4.2: `name` 属性为 `"deepseek"`
+  - `programmatic` TR-4.3: `default_api_base` 为 `"https://api.deepseek.com/v1"`
+  - `programmatic` TR-4.4: `default_models` 包含 `deepseek-chat`
+- **Notes**: DeepSeek 完全兼容 OpenAI 接口，只需覆盖配置
+
+## [x] Task 5: Ollama 适配器
+- **Priority**: high
+- **Depends On**: Task 2
+- **Description**: 
+  - 创建 `core/ai/providers/ollama_provider.py`
+  - 继承 `BaseAIProvider`
+  - 使用 `httpx` 调用 Ollama REST API：
+    - `chat()`: POST `http://localhost:11434/api/chat`，解析 JSON 响应
+    - `chat_stream()`: POST with `stream=true`，逐行解析 ndjson，yield `message.content`
+    - `test_connection()`: GET `http://localhost:11434/api/tags`，返回 200 即成功
+    - `list_models()`: GET `http://localhost:11434/api/tags`，解析 `models[].name`
+  - `default_api_base = "http://localhost:11434"`
+  - `default_models = ["llama3", "qwen2"]`（提示性，实际从 API 获取）
+  - 不需要 API Key（本地服务）
+  - 错误处理：httpx.ConnectError（Ollama 未运行）
+- **Acceptance Criteria Addressed**: AC-5
+- **Test Requirements**:
+  - `programmatic` TR-5.1: `OllamaProvider` 继承 `BaseAIProvider`
+  - `programmatic` TR-5.2: `name` 属性为 `"ollama"`
+  - `programmatic` TR-5.3: `default_api_base` 为 `"http://localhost:11434"`
+  - `programmatic` TR-5.4: `test_connection` 在连接失败时返回 False 或抛出异常
+  - `programmatic` TR-5.5: `list_models` 返回模型名称列表
+- **Notes**: httpx 已在 Task 1 安装
+
+## [x] Task 6: API Key 加密工具
+- **Priority**: high
+- **Depends On**: None
+- **Description**: 
+  - 创建 `utils/crypto.py`
+  - `encrypt_api_key(key: str) -> str`：使用 base64 + 机器码异或加密
+  - `decrypt_api_key(encrypted: str) -> str`：解密
+  - `get_machine_code() -> str`：基于 Windows 用户名 + 计算机名生成机器码
+  - 加密不是高安全级别（非银行业），但防止直接复制数据库泄露
+- **Acceptance Criteria Addressed**: AC-12
+- **Test Requirements**:
+  - `programmatic` TR-6.1: `encrypt_api_key("sk-test123")` 返回非空字符串
+  - `programmatic` TR-6.2: `decrypt_api_key(encrypt_api_key("sk-test123"))` == `"sk-test123"`
+  - `programmatic` TR-6.3: 加密结果不包含原始 key 的明文片段
+  - `programmatic` TR-6.4: `get_machine_code()` 在同一机器上返回相同值
+- **Notes**: 简单方案，不引入 cryptography 库
+
+## [x] Task 7: AI 管理器
+- **Priority**: high
+- **Depends On**: Task 2, Task 3, Task 4, Task 5, Task 6
+- **Description**: 
+  - 创建 `core/ai/manager.py`，实现 `AIManager` 单例类
+  - 提供商注册表：`_providers: dict[str, BaseAIProvider]`
+  - `register(provider: BaseAIProvider)`：注册提供商
+  - `init()`：启动时自动注册 OpenAI/DeepSeek/Ollama，从数据库加载配置
+  - `get_provider(name: str) -> BaseAIProvider`：获取提供商实例
+  - `get_active_provider() -> BaseAIProvider | None`：获取当前激活的提供商
+  - `set_active_provider(name: str)`：切换激活提供商
+  - `save_config(name, api_key, api_base, model, temperature, max_tokens)`：保存配置到数据库
+  - `load_configs()`：从数据库加载所有配置
+  - `list_providers() -> list[dict]`：返回所有提供商信息（名称、显示名、是否已配置、是否激活）
+  - `chat(messages, config) -> AIResponse`：通过激活提供商调用
+  - `chat_stream(messages, config) -> Generator[str]`：通过激活提供商流式调用
+  - API Key 加密/解密使用 `utils/crypto.py`
+- **Acceptance Criteria Addressed**: AC-6, AC-12
+- **Test Requirements**:
+  - `programmatic` TR-7.1: `AIManager` 是单例
+  - `programmatic` TR-7.2: `init()` 后注册了 3 个提供商
+  - `programmatic` TR-7.3: `list_providers()` 返回 3 个提供商信息
+  - `programmatic` TR-7.4: `save_config()` 后数据库中有对应记录
+  - `programmatic` TR-7.5: `get_active_provider()` 在未配置时返回 None
+  - `programmatic` TR-7.6: API Key 保存到数据库时是加密的
+- **Notes**: AIManager 不依赖 Qt，纯 Python 逻辑
+
+## [x] Task 8: 提示词模板系统
+- **Priority**: high
+- **Depends On**: None
+- **Description**: 
+  - 创建 `core/ai/prompts/base.py`：
+    - `PromptTemplate` 基类：`render(context: dict) -> list[Message]`
+    - 使用 Jinja2 模板引擎渲染
+    - 返回 `[Message(role="system", ...), Message(role="user", ...)]` 列表
+  - 创建 `core/ai/prompts/write_templates.py`：
+    - `ContinueWriteTemplate`：续写模板
+    - 系统提示词：设定 AI 为小说续写助手，包含写作风格指导
+    - 用户提示词模板：包含章节标题、当前内容（尾部 2000 字）、项目类型、写作方法
+    - 模板变量：`{{ title }}`、`{{ content }}`、`{{ genre }}`、`{{ writing_method }}`、`{{ word_count }}`
+  - 创建 `core/ai/prompts/registry.py`：
+    - `PROMPT_REGISTRY`：模板注册表
+    - `get_template(name) -> PromptTemplate`
+    - `list_templates() -> list[str]`
+- **Acceptance Criteria Addressed**: AC-8
+- **Test Requirements**:
+  - `programmatic` TR-8.1: `PromptTemplate` 是 ABC
+  - `programmatic` TR-8.2: `ContinueWriteTemplate.render({"title": "测试", "content": "内容...", "genre": "玄幻", "writing_method": "三幕结构", "word_count": 1000})` 返回 list[Message]
+  - `programmatic` TR-8.3: 渲染结果包含 system 消息和 user 消息
+  - `programmatic` TR-8.4: user 消息内容包含传入的标题和内容
+  - `programmatic` TR-8.5: 内容超过 2000 字时自动截取尾部
+- **Notes**: Jinja2 已在 requirements.txt 中
+
+## [x] Task 9: AI 续写服务（流式输出 QThread）
+- **Priority**: high
+- **Depends On**: Task 7, Task 8
+- **Description**: 
+  - 创建 `core/ai/writing_service.py`
+  - `WritingAIService` 类：
+    - `continue_write(chapter_id: int, project_id: int) -> None`：触发续写
+    - 内部流程：加载章节内容 → 构建提示词 → 调用 AIManager.chat_stream() → 逐字发送到 UI
+  - 创建 `core/ai/ai_worker.py`：
+    - `AIWorker(QThread)`：后台线程执行 AI 调用
+    - 信号：`chunk_received(str)`、`finished(str)`、`error(str)`
+    - `cancel()`：设置取消标志，停止生成
+    - 在 `run()` 中调用 `AIManager.chat_stream()`，逐 chunk emit 信号
+  - 续写内容截取：当前章节尾部 2000 字作为上下文
+  - 流式输出：每收到一个 chunk，通过信号发送到主线程
+  - 错误处理：捕获所有异常，通过 error 信号发送
+- **Acceptance Criteria Addressed**: AC-3, AC-9, AC-11
+- **Test Requirements**:
+  - `programmatic` TR-9.1: `AIWorker` 继承 `QThread`
+  - `programmatic` TR-9.2: `AIWorker` 有 `chunk_received`、`finished`、`error` 三个信号
+  - `programmatic` TR-9.3: `cancel()` 方法存在且能中断生成
+  - `programmatic` TR-9.4: `WritingAIService.continue_write` 方法签名正确
+  - `programmatic` TR-9.5: 无激活提供商时抛出友好异常
+- **Notes**: QThread + Signal 是 PySide6 异步标准模式
+
+## [x] Task 10: AI 设置对话框
+- **Priority**: high
+- **Depends On**: Task 7
+- **Description**: 
+  - 创建 `ui/dialogs/ai_settings_dialog.py`
+  - `AISettingsDialog(QDialog)`：
+    - 左侧：提供商列表（QListWidget），显示名称 + 状态图标（已配置/未配置）
+    - 右侧：配置表单
+      - API Key（QLineEdit，echoMode=Password，带显示/隐藏按钮）
+      - API Base（QLineEdit，有默认值提示）
+      - 默认模型（QComboBox + "获取模型列表"按钮）
+      - 温度（QDoubleSpinBox，0.0-2.0，步进 0.1）
+      - Max Tokens（QSpinBox，256-32768）
+      - "测试连接"按钮（显示成功/失败状态）
+      - "设为当前提供商"复选框
+    - 底部：保存 / 取消按钮
+  - 测试连接：点击后在后台线程执行，不阻塞 UI
+  - 保存：调用 `AIManager.save_config()`
+- **Acceptance Criteria Addressed**: AC-7, AC-12
+- **Test Requirements**:
+  - `programmatic` TR-10.1: `AISettingsDialog` 继承 `QDialog`
+  - `programmatic` TR-10.2: 提供商列表包含 3 个提供商
+  - `programmatic` TR-10.3: API Key 输入框默认隐藏文本（echoMode=Password）
+  - `programmatic` TR-10.4: 保存按钮调用 AIManager.save_config
+  - `human-judgement` TR-10.5: 对话框布局整洁，表单字段对齐，按钮位置合理
+- **Notes**: 测试连接用 QThread 或 QRunnable 避免阻塞
+
+## [x] Task 11: AI 面板 UI
+- **Priority**: high
+- **Depends On**: Task 7
+- **Description**: 
+  - 创建 `ui/sidebar/ai_panel.py`
+  - `AIPanel(QWidget)`：
+    - 提供商/模型选择：QComboBox 显示"提供商 - 模型"格式
+    - 温度滑块：QSlider + 标签显示当前值
+    - 续写按钮：大按钮，点击触发续写
+    - 进度区域：
+      - 旋转图标（QMovie 或 CSS 旋转动画）
+      - 取消按钮
+      - 状态文本（"正在生成..." / "已生成 XXX 字" / "生成失败：XXX"）
+    - 快捷设置按钮：打开 AI 设置对话框
+  - 信号：
+    - `continue_write_requested()`：续写按钮点击
+    - `cancel_requested()`：取消按钮点击
+    - `provider_changed(str)`：提供商切换
+  - 方法：
+    - `set_generating(bool)`：切换生成/空闲状态
+    - `set_status(text: str)`：更新状态文本
+    - `update_providers()`：刷新提供商列表
+- **Acceptance Criteria Addressed**: AC-9
+- **Test Requirements**:
+  - `programmatic` TR-11.1: `AIPanel` 继承 `QWidget`
+  - `programmatic` TR-11.2: 有 `continue_write_requested` 信号
+  - `programmatic` TR-11.3: 有 `cancel_requested` 信号
+  - `programmatic` TR-11.4: `set_generating(True)` 后续写按钮变取消按钮
+  - `programmatic` TR-11.5: `set_status("正在生成...")` 更新状态文本
+  - `human-judgement` TR-11.6: 面板布局合理，按钮大小适中
+- **Notes**: AI 面板放在右侧面板的标签页中
+
+## [x] Task 12: 主窗口集成 AI 功能
+- **Priority**: high
+- **Depends On**: Task 9, Task 10, Task 11
+- **Description**: 
+  - 修改 `ui/main_window.py`：
+    - 菜单栏"设置"菜单添加"AI 设置"菜单项
+    - 右侧面板添加"AI"标签页，嵌入 AIPanel
+    - 初始化时调用 `AIManager.init()`
+    - 连接 AIPanel 信号：
+      - `continue_write_requested` → `_on_ai_continue_write()`
+      - `cancel_requested` → `_on_ai_cancel()`
+    - 连接 AIWorker 信号：
+      - `chunk_received` → `_on_ai_chunk_received()`：插入编辑器
+      - `finished` → `_on_ai_finished()`：恢复编辑器、更新面板状态
+      - `error` → `_on_ai_error()`：显示错误提示
+    - `_on_ai_continue_write()`：
+      - 获取当前章节 ID
+      - 创建 AIWorker 线程
+      - 设置编辑器只读
+      - 启动线程
+    - `_on_ai_chunk_received(text)`：
+      - 在编辑器当前光标位置插入文本
+      - 自动滚动到光标位置
+    - `_on_ai_cancel()`：调用 worker.cancel()
+  - 编辑器右键菜单添加"AI 续写"选项
+  - 工具栏添加续写按钮
+  - 快捷键 Ctrl+I 绑定续写
+- **Acceptance Criteria Addressed**: AC-3, AC-10, AC-11
+- **Test Requirements**:
+  - `programmatic` TR-12.1: MainWindow 有 `_on_ai_continue_write` 方法
+  - `programmatic` TR-12.2: MainWindow 有 `_on_ai_chunk_received` 方法
+  - `programmatic` TR-12.3: MainWindow 有 `_on_ai_cancel` 方法
+  - `programmatic` TR-12.4: 菜单栏有"AI 设置"菜单项
+  - `programmatic` TR-12.5: 右侧面板有 AI 标签页
+  - `programmatic` TR-12.6: 编辑器右键菜单有"AI 续写"
+  - `human-judgement` TR-12.7: 续写生成时编辑器变只读，生成完恢复
+  - `human-judgement` TR-12.8: 流式内容实时插入编辑器，不卡顿
+- **Notes**: AIWorker 实例需保存在 self 中防止被 GC
+
+## [x] Task 13: QSS 主题适配
+- **Priority**: medium
+- **Depends On**: Task 10, Task 11
+- **Description**: 
+  - 修改 `ui/styles/dark.qss` 和 `ui/styles/light.qss`
+  - 添加 AI 面板样式：
+    - `AIPanel#ai_panel` 背景色
+    - 续写按钮样式（大按钮、强调色）
+    - 取消按钮样式（危险色）
+    - 状态文本样式
+    - 进度指示器样式
+  - 添加 AI 设置对话框样式：
+    - 提供商列表样式
+    - 表单字段样式
+    - 测试连接按钮样式
+- **Acceptance Criteria Addressed**: AC-9
+- **Test Requirements**:
+  - `programmatic` TR-13.1: dark.qss 包含 `#ai_panel` 选择器
+  - `programmatic` TR-13.2: light.qss 包含 `#ai_panel` 选择器
+  - `human-judgement` TR-13.3: 暗色主题下 AI 面板视觉协调
+  - `human-judgement` TR-13.4: 亮色主题下 AI 面板视觉协调
+- **Notes**: 沿用现有 QSS 风格
+
+# Task Dependencies
+- Task 1 → Task 2, Task 6
+- Task 2 → Task 3, Task 5
+- Task 3 → Task 4
+- Task 2,3,4,5,6 → Task 7
+- Task 8 (无依赖，可与 Task 3-6 并行)
+- Task 7,8 → Task 9
+- Task 7 → Task 10, Task 11
+- Task 9,10,11 → Task 12
+- Task 10,11 → Task 13
+
+# 并行执行建议
+- Task 6（加密工具）和 Task 8（提示词模板）与 Task 2-5 无依赖，可并行
+- Task 10（设置对话框）和 Task 11（AI面板）在 Task 7 完成后可并行
