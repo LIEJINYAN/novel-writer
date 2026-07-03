@@ -17,8 +17,8 @@ from PySide6.QtGui import QAction, QKeySequence, QShortcut, QTextCursor, QTextCh
 from ui.styles.style_manager import style_manager
 from ui.dialogs.new_project_dialog import NewProjectDialog
 from ui.dialogs.ai_settings_dialog import AISettingsDialog
-from ui.components.editor_widget import EditorWidget
-from ui.components.editor_container import EditorContainer
+from ui.editor.editor_widget import EditorWidget
+from ui.editor.editor_container import EditorContainer
 from ui.sidebar.outline_panel import OutlinePanel
 from ui.sidebar.stats_panel import StatsPanel
 from ui.sidebar.ai_panel import AIPanel
@@ -28,16 +28,15 @@ from ui.sidebar.relationship_panel import RelationshipPanel
 from ui.sidebar.timeline_panel import TimelinePanel
 from ui.sidebar.world_panel import WorldPanel
 from ui.sidebar.check_panel import CheckPanel
-from core.ai.editing_service import editing_service
-from core.ai.analysis_service import analysis_service
 from ui.dialogs.ai_polish_diff_dialog import AIPolishDiffDialog
+from ui.editor.ai_chat_panel import AIChatWidget
 from utils.signal_bus import signal_bus
 from utils.logger import logger
 from services.project_service import ProjectService
 from services.chapter_service import ChapterService
+from services.editor_service import EditorService
 from services.project_info_service import project_info_service
-from core.ai.manager import ai_manager
-from core.ai.writing_service import writing_service
+from services.ai_service import AIService
 from core.ai.base import AIProviderError
 from models import db_manager, Project, Volume, Chapter
 from services.export_service import ExportService
@@ -47,6 +46,7 @@ from services.epub_import_service import EpubImportService
 from services.pdf_import_service import PdfImportService
 from ui.dialogs.import_preview_dialog import ImportPreviewDialog
 from ui.dialogs.trash_dialog import TrashDialog
+from ui.dialogs.creative_wizard import CreativeWizard
 
 
 class ProjectTreeWidget(QTreeWidget):
@@ -111,12 +111,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._project_service = ProjectService()
         self._chapter_service = ChapterService()
+        self._ai_service = AIService()
         self._export_service = ExportService()
         self._txt_import_service = TxtImportService()
         self._current_project_id = None
-        self._current_chapter_id = None
-        self._open_chapters = {}
-        self._autosave_timer = QTimer()
         self._stats_debounce_timer = QTimer()
         self._stats_debounce_timer.setSingleShot(True)
         self._stats_debounce_timer.timeout.connect(self._refresh_stats)
@@ -129,12 +127,14 @@ class MainWindow(QMainWindow):
         self._ai_panel = None
         self._ai_worker = None
         self._ai_target_chapter_id = None  # AI 生成目标章节，切换标签页时不变
+        self._auto_hidden_left = False  # 标记左侧栏是否被自动隐藏
         self._init_window()
         self._init_menu()
         self._init_toolbar()
         self._init_central_widget()
         self._init_docks()
         self._init_statusbar()
+        self._editor_service = EditorService(self._chapter_service, self._editor_tabs)
         self._init_connections()
         self._init_ai()
 
@@ -171,6 +171,11 @@ class MainWindow(QMainWindow):
         self._save_action.setShortcut("Ctrl+S")
         file_menu.addAction(self._save_action)
 
+        self._save_all_action = QAction("全部保存", self)
+        self._save_all_action.setShortcut("Ctrl+Shift+S")
+        self._save_all_action.triggered.connect(self._on_save_all)
+        file_menu.addAction(self._save_all_action)
+
         file_menu.addSeparator()
 
         close_action = QAction("关闭项目", self)
@@ -180,6 +185,11 @@ class MainWindow(QMainWindow):
         delete_action = QAction("删除项目", self)
         delete_action.triggered.connect(self._on_delete_project)
         file_menu.addAction(delete_action)
+
+        close_tab_action = QAction("关闭标签页", self)
+        close_tab_action.setShortcut("Ctrl+W")
+        close_tab_action.triggered.connect(self._on_close_current_tab)
+        file_menu.addAction(close_tab_action)
 
         file_menu.addSeparator()
 
@@ -217,6 +227,34 @@ class MainWindow(QMainWindow):
         # ========== 视图菜单 ==========
         view_menu = menubar.addMenu("视图(&V)")
 
+        # 专注模式
+        focus_action = QAction("专注模式", self)
+        focus_action.setShortcut("F11")
+        focus_action.triggered.connect(self._on_focus_mode)
+        view_menu.addAction(focus_action)
+
+        view_menu.addSeparator()
+
+        # 面板切换子菜单
+        panel_menu = view_menu.addMenu("面板切换")
+        toggle_left_action = QAction("切换左侧栏", self)
+        toggle_left_action.setShortcut("Ctrl+Shift+L")
+        toggle_left_action.triggered.connect(self._on_toggle_left_panel)
+        panel_menu.addAction(toggle_left_action)
+
+        toggle_right_action = QAction("切换右侧栏", self)
+        toggle_right_action.setShortcut("Ctrl+Shift+R")
+        toggle_right_action.triggered.connect(self._on_toggle_right_panel)
+        panel_menu.addAction(toggle_right_action)
+
+        toggle_bottom_action = QAction("切换底部面板", self)
+        toggle_bottom_action.setShortcut("Ctrl+Shift+B")
+        toggle_bottom_action.triggered.connect(self._on_toggle_bottom_panel)
+        panel_menu.addAction(toggle_bottom_action)
+
+        view_menu.addSeparator()
+
+        # 主题子菜单
         theme_menu = view_menu.addMenu("主题")
         dark_action = QAction("暗色", self)
         dark_action.triggered.connect(lambda: self._switch_theme("dark"))
@@ -225,6 +263,27 @@ class MainWindow(QMainWindow):
         light_action = QAction("亮色", self)
         light_action.triggered.connect(lambda: self._switch_theme("light"))
         theme_menu.addAction(light_action)
+
+        eye_protection_action = QAction("护眼黄", self)
+        eye_protection_action.triggered.connect(lambda: self._switch_theme("eye_protection"))
+        theme_menu.addAction(eye_protection_action)
+
+        # 字体大小子菜单
+        font_menu = view_menu.addMenu("字体大小")
+        zoom_in_action = QAction("放大", self)
+        zoom_in_action.setShortcut("Ctrl++")
+        zoom_in_action.triggered.connect(self._on_zoom_in)
+        font_menu.addAction(zoom_in_action)
+
+        zoom_out_action = QAction("缩小", self)
+        zoom_out_action.setShortcut("Ctrl+-")
+        zoom_out_action.triggered.connect(self._on_zoom_out)
+        font_menu.addAction(zoom_out_action)
+
+        zoom_reset_action = QAction("重置", self)
+        zoom_reset_action.setShortcut("Ctrl+0")
+        zoom_reset_action.triggered.connect(self._on_zoom_reset)
+        font_menu.addAction(zoom_reset_action)
 
         # ========== 项目菜单 ==========
         project_menu = menubar.addMenu("项目(&P)")
@@ -243,30 +302,118 @@ class MainWindow(QMainWindow):
         proj_delete_action.triggered.connect(self._on_delete_project)
         project_menu.addAction(proj_delete_action)
 
-        # ========== 工具菜单 ==========
-        tool_menu = menubar.addMenu("工具(&T)")
+        # ========== 写作菜单 ==========
+        writing_menu = menubar.addMenu("写作(&W)")
 
-        settings_action = QAction("应用设置...", self)
-        settings_action.triggered.connect(self._on_app_settings)
-        tool_menu.addAction(settings_action)
+        self._constitution_action = QAction("创作宪法...", self)
+        self._constitution_action.triggered.connect(self._on_creative_wizard)
+        writing_menu.addAction(self._constitution_action)
 
-        tool_menu.addSeparator()
+        specify_action = QAction("故事规格...", self)
+        specify_action.triggered.connect(self._on_specify)
+        writing_menu.addAction(specify_action)
+
+        clarify_action = QAction("决策澄清...", self)
+        clarify_action.triggered.connect(self._on_clarify)
+        writing_menu.addAction(clarify_action)
+
+        plan_action = QAction("创作计划...", self)
+        plan_action.triggered.connect(self._on_plan)
+        writing_menu.addAction(plan_action)
+
+        tasks_action = QAction("任务分解...", self)
+        tasks_action.triggered.connect(self._on_tasks)
+        writing_menu.addAction(tasks_action)
+
+        writing_menu.addSeparator()
+
+        ai_write_action = QAction("AI 续写", self)
+        ai_write_action.setShortcut("Ctrl+Enter")
+        ai_write_action.triggered.connect(self._on_ai_continue_write)
+        writing_menu.addAction(ai_write_action)
+
+        quality_action = QAction("质量分析...", self)
+        quality_action.triggered.connect(self._on_writing_quality_analysis)
+        writing_menu.addAction(quality_action)
+
+        writing_menu.addSeparator()
+
+        audit_action = QAction("AI 审计...", self)
+        audit_action.triggered.connect(self._on_writing_ai_audit)
+        writing_menu.addAction(audit_action)
+
+        # ========== AI 菜单 ==========
+        ai_menu = menubar.addMenu("AI")
+
+        ai_chat_action = QAction("AI 对话面板", self)
+        ai_chat_action.setShortcut("Ctrl+Shift+A")
+        ai_chat_action.triggered.connect(self._on_toggle_ai_chat)
+        ai_menu.addAction(ai_chat_action)
+
+        # 切换提供商子菜单
+        provider_menu = ai_menu.addMenu("切换提供商")
+        for provider_name in ["OpenAI", "Claude", "Gemini", "Ollama", "DeepSeek"]:
+            act = QAction(provider_name, self)
+            act.triggered.connect(lambda checked=False, p=provider_name.lower(): self._on_ai_provider_changed(p))
+            provider_menu.addAction(act)
+
+        # 切换模型子菜单
+        model_menu = ai_menu.addMenu("切换模型")
+        for model_name in ["gpt-4o", "claude-sonnet-4-5", "gemini-2.0-flash", "deepseek-chat"]:
+            act = QAction(model_name, self)
+            act.triggered.connect(lambda checked=False, m=model_name: self._on_ai_switch_model(m))
+            model_menu.addAction(act)
+
+        ai_menu.addSeparator()
 
         ai_settings_action = QAction("AI 设置...", self)
         ai_settings_action.triggered.connect(self._on_ai_settings)
-        tool_menu.addAction(ai_settings_action)
+        ai_menu.addAction(ai_settings_action)
 
-        tool_menu.addSeparator()
+        ai_menu.addSeparator()
 
-        trash_action = QAction("回收站...", self)
-        trash_action.triggered.connect(self._on_open_trash)
-        tool_menu.addAction(trash_action)
+        # 专家模式子菜单
+        expert_menu = ai_menu.addMenu("专家模式")
+        expert_structure_action = QAction("剧情结构专家", self)
+        expert_structure_action.triggered.connect(lambda: self._on_ai_expert_mode("剧情结构专家"))
+        expert_menu.addAction(expert_structure_action)
 
-        # ========== 帮助菜单 ==========
-        help_menu = menubar.addMenu("帮助(&H)")
-        about_action = QAction("关于(&A)", self)
-        about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
+        expert_character_action = QAction("人物塑造专家", self)
+        expert_character_action.triggered.connect(lambda: self._on_ai_expert_mode("人物塑造专家"))
+        expert_menu.addAction(expert_character_action)
+
+        expert_world_action = QAction("世界观构建专家", self)
+        expert_world_action.triggered.connect(lambda: self._on_ai_expert_mode("世界观构建专家"))
+        expert_menu.addAction(expert_world_action)
+
+        expert_style_action = QAction("风格把控专家", self)
+        expert_style_action.triggered.connect(lambda: self._on_ai_expert_mode("风格把控专家"))
+        expert_menu.addAction(expert_style_action)
+
+        # ========== 追踪菜单 ==========
+        tracking_menu = menubar.addMenu("追踪(&T)")
+
+        tracking_panel_action = QAction("综合追踪面板", self)
+        tracking_panel_action.triggered.connect(self._on_tracking_panel)
+        tracking_menu.addAction(tracking_panel_action)
+
+        plot_check_action = QAction("情节检查...", self)
+        plot_check_action.triggered.connect(self._on_plot_check)
+        tracking_menu.addAction(plot_check_action)
+
+        timeline_action = QAction("时间线管理...", self)
+        timeline_action.triggered.connect(self._on_timeline_management)
+        tracking_menu.addAction(timeline_action)
+
+        relationship_action = QAction("关系图谱...", self)
+        relationship_action.triggered.connect(self._on_relationship_graph)
+        tracking_menu.addAction(relationship_action)
+
+        tracking_menu.addSeparator()
+
+        consistency_action = QAction("一致性检查...", self)
+        consistency_action.triggered.connect(self._on_consistency_check)
+        tracking_menu.addAction(consistency_action)
 
         # ========== 导出菜单 ==========
         export_menu = menubar.addMenu("导出(&X)")
@@ -295,8 +442,34 @@ class MainWindow(QMainWindow):
         export_original_action.triggered.connect(self._on_export_original)
         export_menu.addAction(export_original_action)
 
+        # ========== 工具菜单 ==========
+        tool_menu = menubar.addMenu("工具(&T)")
+
+        settings_action = QAction("应用设置...", self)
+        settings_action.triggered.connect(self._on_app_settings)
+        tool_menu.addAction(settings_action)
+
+        tool_menu.addSeparator()
+
+        ai_settings_action = QAction("AI 设置...", self)
+        ai_settings_action.triggered.connect(self._on_ai_settings)
+        tool_menu.addAction(ai_settings_action)
+
+        tool_menu.addSeparator()
+
+        trash_action = QAction("回收站...", self)
+        trash_action.triggered.connect(self._on_open_trash)
+        tool_menu.addAction(trash_action)
+
+        # ========== 帮助菜单 ==========
+        help_menu = menubar.addMenu("帮助(&H)")
+        about_action = QAction("关于(&A)", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
     def _init_toolbar(self):
         toolbar = QToolBar("主工具栏", self)
+        toolbar.setObjectName("主工具栏")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
@@ -414,12 +587,32 @@ class MainWindow(QMainWindow):
         self._sidebar_dock.setMinimumWidth(250)
         self.addDockWidget(Qt.RightDockWidgetArea, self._sidebar_dock)
 
+        # 底部 AI 对话面板
+        self._ai_chat_dock = QDockWidget("AI 对话", self)
+        self._ai_chat_dock.setObjectName("ai_chat_dock")
+        self._ai_chat_widget = AIChatWidget()
+        self._ai_chat_dock.setWidget(self._ai_chat_widget)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self._ai_chat_dock)
+        self._ai_chat_dock.hide()  # 默认隐藏
+
     def _init_statusbar(self):
         self._status_label = QLabel("就绪")
         self.statusBar().addWidget(self._status_label)
 
         self._word_count_label = QLabel("字数：0")
         self.statusBar().addPermanentWidget(self._word_count_label)
+
+        self._line_count_label = QLabel("行数：0")
+        self.statusBar().addPermanentWidget(self._line_count_label)
+
+        self._para_count_label = QLabel("段落：0")
+        self.statusBar().addPermanentWidget(self._para_count_label)
+
+        self._project_name_label = QLabel("")
+        self.statusBar().addPermanentWidget(self._project_name_label)
+
+        self._ai_provider_label = QLabel("AI: -")
+        self.statusBar().addPermanentWidget(self._ai_provider_label)
 
     def _init_connections(self):
         signal_bus.status_message.connect(self._on_status_message)
@@ -428,8 +621,11 @@ class MainWindow(QMainWindow):
         self._project_tree.itemClicked.connect(self._on_tree_item_clicked)
         self._editor_tabs.currentChanged.connect(self._on_tab_changed)
         self._save_action.triggered.connect(self._on_save_current)
-        self._autosave_timer.timeout.connect(self._on_autosave)
-        self._reload_autosave_interval()
+        self._editor_service.reload_autosave_interval()
+
+        # 编辑器服务信号
+        self._editor_service.autosave_completed.connect(self._on_autosave_completed)
+        self._editor_service.chapter_saved.connect(self._on_chapter_saved)
 
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._toggle_search_panel)
@@ -453,6 +649,12 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Shift+R"), self, self._ai_panel.rewrite_requested.emit)
         QShortcut(QKeySequence("Ctrl+Shift+A"), self, self._ai_panel.analyze_requested.emit)
 
+        # 全局快捷键
+        QShortcut(QKeySequence("Ctrl+W"), self, self._on_close_current_tab)
+        QShortcut(QKeySequence("Ctrl+Shift+S"), self, self._on_save_all)
+        QShortcut(QKeySequence("Ctrl+Shift+D"), self, self._on_generate_dialogue)
+        QShortcut(QKeySequence("Ctrl+/"), self, self._on_show_shortcuts)
+
         # 大纲面板 - 点击章节范围跳转
         self._outline_panel.navigate_to_chapter.connect(self._open_chapter_editor)
 
@@ -465,7 +667,7 @@ class MainWindow(QMainWindow):
     def _init_ai(self):
         """初始化 AI 管理器并刷新面板。"""
         try:
-            ai_manager.init()
+            self._ai_service.init()
         except Exception as e:
             logger.error(f"AI 管理器初始化失败: {e}")
         # 刷新 AI 面板的提供商列表
@@ -481,13 +683,12 @@ class MainWindow(QMainWindow):
 
     def _on_ai_provider_changed(self, provider_name: str):
         """AI 面板切换提供商。"""
-        from core.ai.manager import ai_manager
-
         try:
-            ai_manager.set_active_provider(provider_name)
+            self._ai_service.set_active_provider(provider_name)
             logger.info(f"切换 AI 提供商: {provider_name}")
             if self._ai_panel is not None:
                 self._ai_panel.update_providers()
+            self._update_ai_provider_label()
         except Exception as e:
             logger.error(f"切换提供商失败: {e}")
 
@@ -546,20 +747,49 @@ class MainWindow(QMainWindow):
         else:
             self._browse_project()
 
+    def _update_ai_provider_label(self):
+        """更新状态栏的 AI 提供商标签。"""
+        try:
+            from core.ai.manager import ai_manager
+            active = ai_manager.get_active_provider()
+            if active:
+                self._ai_provider_label.setText(f"AI: {active.display_name}")
+            else:
+                self._ai_provider_label.setText("AI: -")
+        except Exception:
+            self._ai_provider_label.setText("AI: -")
+
+    def resizeEvent(self, event):
+        """响应窗口大小变化，自动隐藏/显示侧栏。"""
+        super().resizeEvent(event)
+        width = self.width()
+
+        if width < 1000 and not self._auto_hidden_left:
+            # 自动隐藏左侧栏
+            if self._project_dock.isVisible():
+                self._project_dock.setVisible(False)
+                self._auto_hidden_left = True
+        elif width >= 1400 and self._auto_hidden_left:
+            # 恢复左侧栏
+            self._project_dock.setVisible(True)
+            self._auto_hidden_left = False
+
     def _on_close_project(self):
         """关闭当前项目。"""
         if self._current_project_id is None:
             signal_bus.status_message.emit("当前没有打开的项目")
             return
 
-        for chapter_id in list(self._open_chapters.keys()):
-            self._save_chapter(chapter_id)
-
-        self._open_chapters.clear()
+        self._editor_service.save_all()
+        self._editor_service.close_all_editors()
         self._current_project_id = None
         self._project_tree.clear()
         self._editor_tabs.clear()
-        self._word_count_label.setText("字数：0 | 段落：0")
+        self._word_count_label.setText("字数：0")
+        self._line_count_label.setText("行数：0")
+        self._para_count_label.setText("段落：0")
+        self._project_name_label.setText("")
+        self._ai_provider_label.setText("AI: -")
         self._outline_panel.clear()
         self._stats_panel.clear()
         self._character_panel.clear()
@@ -747,7 +977,7 @@ class MainWindow(QMainWindow):
 
         # 关闭已打开的标签页
         for ch_id in chapter_ids:
-            if ch_id in self._open_chapters:
+            if self._editor_service.is_open(ch_id):
                 self._close_chapter_tab(ch_id)
 
         try:
@@ -854,7 +1084,7 @@ class MainWindow(QMainWindow):
             self._chapter_service.rename_volume(volume_id, new_name)
             self._load_project_tree(self._current_project_id)
 
-            for chapter_id, (tab_idx, _) in list(self._open_chapters.items()):
+            for chapter_id, (tab_idx, _) in list(self._editor_service.get_open_chapters().items()):
                 chapter = self._chapter_service.get_chapter(chapter_id)
                 if chapter and chapter.volume_id == volume_id:
                     tab_title = f"第{chapter.chapter_number}章 {chapter.title}"
@@ -883,7 +1113,7 @@ class MainWindow(QMainWindow):
                 return
 
             chapters_to_close = []
-            for chapter_id, (_, _) in list(self._open_chapters.items()):
+            for chapter_id, (_, _) in list(self._editor_service.get_open_chapters().items()):
                 chapter = self._chapter_service.get_chapter(chapter_id)
                 if chapter and chapter.volume_id == volume_id:
                     chapters_to_close.append(chapter_id)
@@ -933,8 +1163,8 @@ class MainWindow(QMainWindow):
             self._chapter_service.rename_chapter(chapter_id, new_title)
             self._load_project_tree(self._current_project_id)
 
-            if chapter_id in self._open_chapters:
-                tab_idx, _ = self._open_chapters[chapter_id]
+            if self._editor_service.is_open(chapter_id):
+                tab_idx = self._editor_service.get_tab_index(chapter_id)
                 updated_chapter = self._chapter_service.get_chapter(chapter_id)
                 if updated_chapter:
                     tab_title = f"第{updated_chapter.chapter_number}章 {updated_chapter.title}"
@@ -962,7 +1192,7 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
 
-            if chapter_id in self._open_chapters:
+            if self._editor_service.is_open(chapter_id):
                 self._close_chapter_tab(chapter_id)
 
             self._chapter_service.delete_chapter(chapter_id)
@@ -1211,17 +1441,17 @@ class MainWindow(QMainWindow):
     # ========== 辅助方法 ==========
 
     def _close_chapter_tab(self, chapter_id: int):
-        """关闭指定章节的标签页，更新 _open_chapters 映射。"""
-        if chapter_id not in self._open_chapters:
+        """关闭指定章节的标签页，更新编辑器服务中的映射。"""
+        if not self._editor_service.is_open(chapter_id):
             return
 
-        tab_idx, _ = self._open_chapters[chapter_id]
-        del self._open_chapters[chapter_id]
+        tab_idx = self._editor_service.get_tab_index(chapter_id)
+        self._editor_service.unregister_editor(chapter_id)
 
-        for cid in list(self._open_chapters.keys()):
-            idx, editor = self._open_chapters[cid]
+        for cid in list(self._editor_service.get_open_chapters().keys()):
+            idx, container = self._editor_service.get_open_chapters()[cid]
             if idx > tab_idx:
-                self._open_chapters[cid] = (idx - 1, editor)
+                self._editor_service.update_tab_index(cid, idx - 1)
 
         self._editor_tabs.removeTab(tab_idx)
 
@@ -1234,8 +1464,8 @@ class MainWindow(QMainWindow):
             self._open_chapter_editor(chapter_id)
 
     def _open_chapter_editor(self, chapter_id: int):
-        if chapter_id in self._open_chapters:
-            tab_index, _ = self._open_chapters[chapter_id]
+        if self._editor_service.is_open(chapter_id):
+            tab_index = self._editor_service.get_tab_index(chapter_id)
             self._editor_tabs.setCurrentIndex(tab_index)
             return
 
@@ -1247,8 +1477,16 @@ class MainWindow(QMainWindow):
         container = EditorContainer()
         editor = container.editor
         editor.set_content(chapter.content or "")
+        # 从 QSettings 恢复编辑器字号
+        settings = QSettings("NovelWriter", "NovelWriter")
+        if settings.value("editor_font_size"):
+            size = int(settings.value("editor_font_size"))
+            if size > 0:
+                font = editor.font()
+                font.setPointSize(size)
+                editor.setFont(font)
         # 应用撤销栈深度
-        self._apply_undo_stack_depth_to_editor(editor)
+        self._editor_service.apply_undo_depth(editor)
         # 撤销/重做按钮
         editor.undoAvailable.connect(self._undo_act.setEnabled)
         editor.redoAvailable.connect(self._redo_act.setEnabled)
@@ -1272,15 +1510,16 @@ class MainWindow(QMainWindow):
 
         tab_title = f"第{chapter.chapter_number}章 {chapter.title}"
         tab_index = self._editor_tabs.addTab(container, tab_title)
-        self._open_chapters[chapter_id] = (tab_index, container)
+        self._editor_service.register_editor(chapter_id, container, tab_index)
 
         self._editor_tabs.setCurrentIndex(tab_index)
         self._update_status_word_count(editor)
 
     def _on_editor_content_changed(self, chapter_id: int):
-        if chapter_id not in self._open_chapters:
+        if not self._editor_service.is_open(chapter_id):
             return
-        tab_index, container = self._open_chapters[chapter_id]
+        tab_index = self._editor_service.get_tab_index(chapter_id)
+        container = self._editor_service.get_open_chapters()[chapter_id][1]
         editor = container.editor if isinstance(container, EditorContainer) else container
         tab_text = self._editor_tabs.tabText(tab_index)
         if not tab_text.endswith("*"):
@@ -1291,11 +1530,11 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int):
         if index < 0:
-            self._current_chapter_id = None
+            self._editor_service.set_current_chapter_id(None)
             return
-        for chapter_id, (tab_idx, container) in self._open_chapters.items():
+        for chapter_id, (tab_idx, container) in self._editor_service.get_open_chapters().items():
             if tab_idx == index:
-                self._current_chapter_id = chapter_id
+                self._editor_service.set_current_chapter_id(chapter_id)
                 editor = container.editor if isinstance(container, EditorContainer) else container
                 self._update_status_word_count(editor)
                 search_panel = self._get_current_search_panel()
@@ -1303,96 +1542,50 @@ class MainWindow(QMainWindow):
                     self._do_search()
                 return
         # 没有匹配的章节（例如欢迎页）
-        self._current_chapter_id = None
+        self._editor_service.set_current_chapter_id(None)
 
     def _update_status_word_count(self, editor: EditorWidget):
         word_count = editor.count_words()
         para_count = editor.count_paragraphs()
-        self._word_count_label.setText(f"字数：{word_count:,} | 段落：{para_count}")
+        line_count = editor.blockCount()
+        self._word_count_label.setText(f"字数：{word_count:,}")
+        self._line_count_label.setText(f"行数：{line_count:,}")
+        self._para_count_label.setText(f"段落：{para_count:,}")
 
     def _on_save_current(self):
-        current_index = self._editor_tabs.currentIndex()
-        if current_index < 0:
-            return
-
-        current_chapter_id = None
-        for chapter_id, (tab_idx, _) in self._open_chapters.items():
-            if tab_idx == current_index:
-                current_chapter_id = chapter_id
-                break
-
-        if current_chapter_id is None:
-            return
-
-        self._save_chapter(current_chapter_id)
-        self._status_label.setText("已保存")
-        QTimer.singleShot(3000, lambda: self._status_label.setText("就绪"))
-
-    def _save_chapter(self, chapter_id: int):
-        if chapter_id not in self._open_chapters:
-            return
-        tab_index, editor = self._open_chapters[chapter_id]
-        if not editor.is_modified():
-            return
-
-        content = editor.get_content()
         try:
-            self._chapter_service.update_chapter_content(chapter_id, content)
-            editor.set_modified(False)
-            tab_text = self._editor_tabs.tabText(tab_index)
-            if tab_text.endswith("*"):
-                self._editor_tabs.setTabText(tab_index, tab_text[:-1])
-            self._refresh_stats()
+            saved = self._editor_service.save_current()
+            if saved:
+                self._status_label.setText("已保存")
+                QTimer.singleShot(3000, lambda: self._status_label.setText("就绪"))
         except Exception as e:
-            logger.error(f"保存章节失败: {e}")
-            QMessageBox.critical(self, "错误", f"保存章节失败：{str(e)}")
+            logger.error(f"保存失败: {e}")
+            QMessageBox.critical(self, "错误", f"保存失败：{str(e)}")
 
-    def _on_autosave(self):
-        saved_count = 0
-        for chapter_id in list(self._open_chapters.keys()):
-            _, editor = self._open_chapters[chapter_id]
-            if editor.is_modified():
-                self._save_chapter(chapter_id)
-                saved_count += 1
-
+    def _on_autosave_completed(self, saved_count: int):
+        """自动保存完成后的 UI 更新。"""
         if saved_count > 0:
             self._status_label.setText("已自动保存")
             QTimer.singleShot(3000, lambda: self._status_label.setText("就绪"))
 
-    def _reload_autosave_interval(self):
-        """从 QSettings 读取自动保存间隔并重启定时器。"""
-        settings = QSettings("NovelWriter", "NovelWriter")
-        interval = settings.value("autosave_interval", 30, type=int)
-        self._autosave_timer.setInterval(interval * 1000)
-        self._autosave_timer.start()
-
-    def _apply_undo_stack_depth_to_editor(self, editor):
-        """对单个编辑器应用撤销栈深度设置。"""
-        settings = QSettings("NovelWriter", "NovelWriter")
-        depth = settings.value("undo_stack_depth", 100, type=int)
-        editor.document().setMaximumBlockCount(depth)
-
-    def _apply_undo_stack_depth_to_editors(self):
-        """对所有打开的编辑器应用撤销栈深度设置。"""
-        settings = QSettings("NovelWriter", "NovelWriter")
-        depth = settings.value("undo_stack_depth", 100, type=int)
-        for chapter_id, (_, editor) in self._open_chapters.items():
-            editor.document().setMaximumBlockCount(depth)
+    def _on_chapter_saved(self, chapter_id: int):
+        """章节保存后刷新统计。"""
+        self._refresh_stats()
 
     def _on_general_settings_saved(self):
         """通用设置保存后的回调。"""
-        self._reload_autosave_interval()
-        self._apply_undo_stack_depth_to_editors()
+        self._editor_service.reload_autosave_interval()
+        self._editor_service.apply_undo_depth_to_all()
 
     # ========== 工具方法 ==========
 
     def _close_editor_tab(self, index: int):
         chapter_id_to_close = None
         editor_to_close = None
-        for chapter_id, (tab_idx, editor) in self._open_chapters.items():
+        for chapter_id, (tab_idx, container) in self._editor_service.get_open_chapters().items():
             if tab_idx == index:
                 chapter_id_to_close = chapter_id
-                editor_to_close = editor
+                editor_to_close = container.editor if hasattr(container, 'editor') else container
                 break
 
         if chapter_id_to_close is None:
@@ -1410,14 +1603,17 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.Cancel:
                 return
             elif reply == QMessageBox.Save:
-                self._save_chapter(chapter_id_to_close)
+                try:
+                    self._editor_service.save_chapter(chapter_id_to_close)
+                except Exception as e:
+                    logger.error(f"保存章节失败: {e}")
 
-        del self._open_chapters[chapter_id_to_close]
+        self._editor_service.unregister_editor(chapter_id_to_close)
 
-        for chapter_id in list(self._open_chapters.keys()):
-            tab_idx, editor = self._open_chapters[chapter_id]
+        for chapter_id in list(self._editor_service.get_open_chapters().keys()):
+            tab_idx, container = self._editor_service.get_open_chapters()[chapter_id]
             if tab_idx > index:
-                self._open_chapters[chapter_id] = (tab_idx - 1, editor)
+                self._editor_service.update_tab_index(chapter_id, tab_idx - 1)
 
         self._editor_tabs.removeTab(index)
 
@@ -1428,7 +1624,7 @@ class MainWindow(QMainWindow):
 
         menu = QMenu(self)
 
-        if self._open_chapters:
+        if self._editor_service.get_open_chapters():
             close_all_action = menu.addAction("关闭所有标签页")
             close_all_action.triggered.connect(self._on_close_all_tabs)
 
@@ -1455,8 +1651,9 @@ class MainWindow(QMainWindow):
     def _on_close_all_tabs(self):
         """关闭所有编辑器标签页。"""
         # 检查是否有未保存的更改
-        unsaved = [ch_id for ch_id, (_, editor) in self._open_chapters.items()
-                   if editor.is_modified()]
+        open_chapters = self._editor_service.get_open_chapters()
+        unsaved = [ch_id for ch_id, (_, container) in open_chapters.items()
+                   if (container.editor if hasattr(container, 'editor') else container).is_modified()]
         if unsaved:
             reply = QMessageBox.question(
                 self, "未保存的更改",
@@ -1468,59 +1665,66 @@ class MainWindow(QMainWindow):
                 return
             elif reply == QMessageBox.Save:
                 for ch_id in unsaved:
-                    self._save_chapter(ch_id)
+                    try:
+                        self._editor_service.save_chapter(ch_id)
+                    except Exception as e:
+                        logger.error(f"保存章节 {ch_id} 失败: {e}")
 
-        self._open_chapters.clear()
+        self._editor_service.close_all_editors()
         # 保留欢迎页
         self._editor_tabs.clear()
         self._show_welcome_page()
 
     def _on_close_other_tabs(self, keep_index: int):
         """关闭除指定标签页外的所有标签页。"""
+        open_chapters = self._editor_service.get_open_chapters()
         # 收集要保留的 chapter_id
         keep_chapter_id = None
-        for ch_id, (tab_idx, _) in self._open_chapters.items():
+        for ch_id, (tab_idx, _) in open_chapters.items():
             if tab_idx == keep_index:
                 keep_chapter_id = ch_id
                 break
 
         # 从后往前关闭，避免索引变化
         tab_indices = sorted(
-            [tab_idx for ch_id, (tab_idx, _) in self._open_chapters.items()
+            [tab_idx for ch_id, (tab_idx, _) in open_chapters.items()
              if tab_idx != keep_index],
             reverse=True,
         )
         for idx in tab_indices:
             self._editor_tabs.removeTab(idx)
 
-        # 重建 _open_chapters（只保留保留的章节）
+        # 重建 EditorService 中的映射（只保留保留的章节）
+        self._editor_service.close_all_editors()
         if keep_chapter_id is not None:
-            container = self._open_chapters[keep_chapter_id][1]
-            self._open_chapters.clear()
-            self._open_chapters[keep_chapter_id] = (0, container)
-        else:
-            self._open_chapters.clear()
+            container = open_chapters[keep_chapter_id][1]
+            self._editor_service.register_editor(keep_chapter_id, container, 0)
 
     def _switch_theme(self, theme: str):
         app = QApplication.instance()
         style_manager.apply_theme(app, theme)
         signal_bus.theme_changed.emit(theme)
-        # 持久化保存主题设置
-        settings = QSettings("NovelWriter", "NovelWriter")
-        settings.setValue("theme", theme)
+        # 持久化保存主题设置（到 app_config 表）
+        from services.app_config_service import app_config_service
+        app_config_service.set("theme", theme)
 
     def _on_status_message(self, message: str):
         self._status_label.setText(message)
         QTimer.singleShot(3000, lambda: self._status_label.setText("就绪"))
 
     def _on_project_opened(self, project_id: int):
-        self._open_chapters.clear()
+        self._editor_service.close_all_editors()
         if self._editor_tabs.count() == 1 and self._editor_tabs.tabText(0) == "欢迎":
             self._editor_tabs.removeTab(0)
         self._current_project_id = project_id
         self._load_project_tree(project_id)
         self._refresh_outline()
         self._refresh_stats()
+        # 更新状态栏：项目名称
+        project_name = self._get_project_name(project_id)
+        self._project_name_label.setText(project_name)
+        # 更新状态栏：AI 提供商
+        self._update_ai_provider_label()
 
     def _on_word_count_updated(self, count: int):
         self._word_count_label.setText(f"字数：{count:,}")
@@ -1532,6 +1736,209 @@ class MainWindow(QMainWindow):
             "基于 PySide6 构建\n\n"
             "© 2026 Novel Writer Team"
         )
+
+    # ========== 视图菜单占位方法 ==========
+
+    def _on_focus_mode(self):
+        """切换专注模式：隐藏所有面板，仅保留编辑器+状态栏。"""
+        if not hasattr(self, '_focus_mode_active'):
+            self._focus_mode_active = False
+
+        if not self._focus_mode_active:
+            # 保存当前布局状态
+            self._focus_saved_state = []
+            # 保存各元素可见性
+            for elem in [self.menuBar(), self._project_dock, self._sidebar_dock,
+                         self.findChild(QToolBar, "主工具栏")]:
+                if elem:
+                    self._focus_saved_state.append((elem, elem.isVisible()))
+                    elem.setVisible(False)
+            self._focus_mode_active = True
+            signal_bus.status_message.emit("专注模式已开启")
+        else:
+            # 恢复布局
+            for elem, visible in self._focus_saved_state:
+                if elem:
+                    elem.setVisible(visible)
+            self._focus_mode_active = False
+            signal_bus.status_message.emit("专注模式已关闭")
+
+    def _on_toggle_left_panel(self):
+        """切换左侧栏（项目树）的显示状态。"""
+        visible = self._project_dock.isVisible()
+        self._project_dock.setVisible(not visible)
+
+    def _on_toggle_right_panel(self):
+        """切换右侧栏的显示状态。"""
+        visible = self._sidebar_dock.isVisible()
+        self._sidebar_dock.setVisible(not visible)
+
+    def _on_toggle_bottom_panel(self):
+        """切换底部面板的显示状态。"""
+        signal_bus.status_message.emit("功能开发中: 底部面板")
+
+    def _on_zoom_in(self):
+        """放大编辑器字体。"""
+        editor = self._get_current_editor()
+        if editor is None:
+            return
+        font = editor.font()
+        current_size = font.pointSize()
+        if current_size < 0:
+            current_size = 16
+        font.setPointSize(current_size + 2)
+        editor.setFont(font)
+        settings = QSettings("NovelWriter", "NovelWriter")
+        settings.setValue("editor_font_size", current_size + 2)
+        signal_bus.status_message.emit(f"字体大小: {current_size + 2}pt")
+
+    def _on_zoom_out(self):
+        """缩小编辑器字体。"""
+        editor = self._get_current_editor()
+        if editor is None:
+            return
+        font = editor.font()
+        current_size = font.pointSize()
+        if current_size < 0:
+            current_size = 16
+        if current_size > 8:
+            font.setPointSize(current_size - 2)
+            editor.setFont(font)
+            settings = QSettings("NovelWriter", "NovelWriter")
+            settings.setValue("editor_font_size", current_size - 2)
+            signal_bus.status_message.emit(f"字体大小: {current_size - 2}pt")
+        else:
+            signal_bus.status_message.emit("已达到最小字体")
+
+    def _on_zoom_reset(self):
+        """重置编辑器字体到默认大小。"""
+        editor = self._get_current_editor()
+        if editor is None:
+            return
+        font = editor.font()
+        font.setPointSize(16)
+        editor.setFont(font)
+        settings = QSettings("NovelWriter", "NovelWriter")
+        settings.setValue("editor_font_size", 16)
+        signal_bus.status_message.emit("字体大小: 已重置")
+
+    # ========== 全局快捷键占位方法 ==========
+
+    def _on_close_current_tab(self):
+        """关闭当前标签页（Ctrl+W）。"""
+        current = self._editor_tabs.currentIndex()
+        if current >= 0:
+            self._close_editor_tab(current)
+
+    def _on_save_all(self):
+        """全部保存（Ctrl+Shift+S）。"""
+        saved = self._editor_service.save_all()
+        if saved > 0:
+            self._status_label.setText(f"已保存全部 {saved} 个章节")
+            QTimer.singleShot(3000, lambda: self._status_label.setText("就绪"))
+
+    def _on_generate_dialogue(self):
+        """AI 对话生成（Ctrl+Shift+D）。"""
+        signal_bus.status_message.emit("AI 对话生成功能开发中")
+
+    def _on_show_shortcuts(self):
+        """显示快捷键参考（Ctrl+/）。"""
+        shortcuts = [
+            ("Ctrl+N", "新建项目"),
+            ("Ctrl+O", "打开项目"),
+            ("Ctrl+S", "保存当前章节"),
+            ("Ctrl+Shift+S", "全部保存"),
+            ("Ctrl+W", "关闭标签页"),
+            ("Ctrl+Q", "退出"),
+            ("Ctrl+Z/Y", "撤销/重做"),
+            ("Ctrl+F", "搜索"),
+            ("Ctrl+H", "替换"),
+            ("Ctrl+I", "AI 续写"),
+            ("Ctrl+Shift+P", "AI 润色"),
+            ("Ctrl+Shift+A", "AI 分析"),
+            ("Ctrl+Shift+L/R", "切换左侧栏/右侧栏"),
+            ("F11", "专注模式"),
+        ]
+        text = "\n".join(f"{k:20s} {v}" for k, v in shortcuts)
+        QMessageBox.information(self, "快捷键参考", text)
+
+    # ========== 写作菜单占位方法 ==========
+
+    def _on_creative_wizard(self):
+        """打开七步法创作向导。"""
+        wizard = CreativeWizard(self)
+        wizard.exec()
+
+    def _on_constitution(self):
+        """创作宪法（七步法第1步）。"""
+        signal_bus.status_message.emit("功能开发中: 创作宪法")
+
+    def _on_specify(self):
+        """故事规格（七步法第2步）。"""
+        signal_bus.status_message.emit("功能开发中: 故事规格")
+
+    def _on_clarify(self):
+        """决策澄清（七步法第3步）。"""
+        signal_bus.status_message.emit("功能开发中: 决策澄清")
+
+    def _on_plan(self):
+        """创作计划（七步法第4步）。"""
+        signal_bus.status_message.emit("功能开发中: 创作计划")
+
+    def _on_tasks(self):
+        """任务分解（七步法第5步）。"""
+        signal_bus.status_message.emit("功能开发中: 任务分解")
+
+    def _on_writing_quality_analysis(self):
+        """质量分析（七步法第7步）。"""
+        signal_bus.status_message.emit("功能开发中: 质量分析")
+
+    def _on_writing_ai_audit(self):
+        """AI 审计。"""
+        signal_bus.status_message.emit("功能开发中: AI 审计")
+
+    # ========== AI 菜单占位方法 ==========
+
+    def _on_toggle_ai_chat(self):
+        """切换底部 AI 对话面板。"""
+        visible = not self._ai_chat_dock.isVisible()
+        self._ai_chat_dock.setVisible(visible)
+        if visible:
+            signal_bus.status_message.emit("AI 对话面板已打开")
+
+    def _on_ai_switch_model(self, model_name: str):
+        """切换 AI 模型。"""
+        signal_bus.status_message.emit(f"功能开发中: 切换模型 - {model_name}")
+
+    def _on_ai_expert_mode(self, expert_type: str):
+        """AI 专家模式。"""
+        signal_bus.status_message.emit(f"功能开发中: 专家模式 - {expert_type}")
+
+    # ========== 追踪菜单占位方法 ==========
+
+    def _on_tracking_panel(self):
+        """打开综合追踪面板。"""
+        signal_bus.status_message.emit("功能开发中: 综合追踪面板")
+
+    def _on_plot_check(self):
+        """情节检查 - 切换到情节面板。"""
+        self._sidebar_tabs.setCurrentWidget(self._plot_panel)
+        signal_bus.status_message.emit("情节检查")
+
+    def _on_timeline_management(self):
+        """时间线管理 - 切换到时间线面板。"""
+        self._sidebar_tabs.setCurrentWidget(self._timeline_panel)
+        signal_bus.status_message.emit("时间线管理")
+
+    def _on_relationship_graph(self):
+        """关系图谱 - 切换到关系面板。"""
+        self._sidebar_tabs.setCurrentWidget(self._relationship_panel)
+        signal_bus.status_message.emit("关系图谱")
+
+    def _on_consistency_check(self):
+        """一致性检查 - 切换到检查面板。"""
+        self._sidebar_tabs.setCurrentWidget(self._check_panel)
+        signal_bus.status_message.emit("一致性检查")
 
     def _refresh_outline(self):
         if self._current_project_id:
@@ -1852,7 +2259,7 @@ class MainWindow(QMainWindow):
             session.close()
 
     def _update_tab_titles_after_reorder(self):
-        for chapter_id, (tab_idx, _) in list(self._open_chapters.items()):
+        for chapter_id, (tab_idx, _) in list(self._editor_service.get_open_chapters().items()):
             chapter = self._chapter_service.get_chapter(chapter_id)
             if chapter:
                 tab_title = f"第{chapter.chapter_number}章 {chapter.title}"
@@ -1870,22 +2277,11 @@ class MainWindow(QMainWindow):
 
     def _get_current_container(self):
         """获取当前标签页的 EditorContainer。"""
-        current_index = self._editor_tabs.currentIndex()
-        if current_index < 0:
-            return None
-        for chapter_id, (tab_idx, container) in self._open_chapters.items():
-            if tab_idx == current_index and isinstance(container, EditorContainer):
-                return container
-        return None
+        return self._editor_service.get_current_container()
 
     def _get_current_search_panel(self):
-        current_index = self._editor_tabs.currentIndex()
-        if current_index < 0:
-            return None
-        for chapter_id, (tab_idx, container) in self._open_chapters.items():
-            if tab_idx == current_index and isinstance(container, EditorContainer):
-                return container.search_panel
-        return None
+        container = self._editor_service.get_current_container()
+        return container.search_panel if container and hasattr(container, 'search_panel') else None
 
     def _toggle_search_panel(self):
         container = self._get_current_container()
@@ -1910,16 +2306,7 @@ class MainWindow(QMainWindow):
                     self._do_search()
 
     def _get_current_editor(self):
-        current_index = self._editor_tabs.currentIndex()
-        if current_index < 0:
-            return None
-        for chapter_id, (tab_idx, container) in self._open_chapters.items():
-            if tab_idx == current_index:
-                if isinstance(container, EditorContainer):
-                    return container.editor
-                elif isinstance(container, EditorWidget):
-                    return container
-        return None
+        return self._editor_service.get_current_editor()
 
     def _on_search_text_changed(self, keyword: str):
         self._do_search()
@@ -2069,9 +2456,9 @@ class MainWindow(QMainWindow):
 
     def _clear_all_highlights(self):
         """清除所有打开的编辑器的高亮。"""
-        for chapter_id, (tab_idx, container) in self._open_chapters.items():
-            editor = container.editor if isinstance(container, EditorContainer) else container
-            if isinstance(editor, EditorWidget):
+        for chapter_id, (tab_idx, container) in self._editor_service.get_open_chapters().items():
+            editor = container.editor if hasattr(container, 'editor') else container
+            if hasattr(editor, 'setExtraSelections'):
                 editor.setExtraSelections([])
 
     def _on_search_next(self):
@@ -2230,16 +2617,17 @@ class MainWindow(QMainWindow):
 
     def _on_ai_continue_write(self, word_count: int = 2000):
         """触发 AI 续写。"""
+        current_cid = self._editor_service.get_current_chapter_id()
         # 获取当前章节
-        if not self._current_chapter_id:
+        if not current_cid:
             if self._ai_panel is not None:
                 self._ai_panel.set_status("请先打开一个章节")
             return
 
         try:
             # 创建 AIWorker
-            worker = writing_service.continue_write(
-                self._current_chapter_id, self._current_project_id,
+            worker = self._ai_service.continue_writing(
+                current_cid, self._current_project_id,
                 max_tokens=word_count
             )
 
@@ -2251,15 +2639,15 @@ class MainWindow(QMainWindow):
 
             # 保存引用防止 GC
             self._ai_worker = worker
-            self._ai_target_chapter_id = self._current_chapter_id
+            self._ai_target_chapter_id = current_cid
 
             # 设置 UI 状态
             self._ai_panel.set_generating(True)
             self._ai_panel.set_status("正在生成...")
 
             # 设置编辑器只读
-            if self._current_chapter_id in self._open_chapters:
-                _, editor = self._open_chapters[self._current_chapter_id]
+            editor = self._editor_service.get_editor(current_cid)
+            if editor:
                 editor.setReadOnly(True)
 
             # 启动线程
@@ -2277,9 +2665,9 @@ class MainWindow(QMainWindow):
 
     def _on_ai_chunk_received(self, text: str):
         """收到 AI 生成的一个文本块（始终插入到目标章节，不受标签页切换影响）。"""
-        cid = self._ai_target_chapter_id or self._current_chapter_id
-        if cid and cid in self._open_chapters:
-            _, editor = self._open_chapters[cid]
+        cid = self._ai_target_chapter_id or self._editor_service.get_current_chapter_id()
+        editor = self._editor_service.get_editor(cid) if cid else None
+        if editor:
             cursor = editor.textCursor()
             cursor.movePosition(QTextCursor.End)
             cursor.insertText(text)
@@ -2291,18 +2679,21 @@ class MainWindow(QMainWindow):
 
     def _on_ai_finished(self, full_text: str):
         """AI 生成完成。"""
-        cid = self._ai_target_chapter_id or self._current_chapter_id
+        cid = self._ai_target_chapter_id or self._editor_service.get_current_chapter_id()
         # 恢复编辑器
-        if cid and cid in self._open_chapters:
-            tab_idx, editor = self._open_chapters[cid]
-            editor.setReadOnly(False)
-            # 标记为已修改
-            editor.set_modified(True)
-            editor.document().setModified(True)
+        if cid and self._editor_service.is_open(cid):
+            tab_idx = self._editor_service.get_tab_index(cid)
+            editor = self._editor_service.get_editor(cid)
+            if editor:
+                editor.setReadOnly(False)
+                # 标记为已修改
+                editor.set_modified(True)
+                editor.document().setModified(True)
             # 在标签页标题添加 * 标记
-            tab_text = self._editor_tabs.tabText(tab_idx)
-            if not tab_text.endswith("*"):
-                self._editor_tabs.setTabText(tab_idx, tab_text + "*")
+            if tab_idx is not None:
+                tab_text = self._editor_tabs.tabText(tab_idx)
+                if not tab_text.endswith("*"):
+                    self._editor_tabs.setTabText(tab_idx, tab_text + "*")
             # 触发防抖刷新统计
             self._stats_debounce_timer.start(1000)
 
@@ -2321,11 +2712,12 @@ class MainWindow(QMainWindow):
 
     def _on_ai_error(self, error_msg: str):
         """AI 生成出错。"""
-        cid = self._ai_target_chapter_id or self._current_chapter_id
+        cid = self._ai_target_chapter_id or self._editor_service.get_current_chapter_id()
         # 恢复编辑器
-        if cid and cid in self._open_chapters:
-            _, editor = self._open_chapters[cid]
-            editor.setReadOnly(False)
+        if cid and self._editor_service.is_open(cid):
+            editor = self._editor_service.get_editor(cid)
+            if editor:
+                editor.setReadOnly(False)
 
         # 更新面板
         self._ai_panel.set_generating(False)
@@ -2389,7 +2781,7 @@ class MainWindow(QMainWindow):
         self._ai_original_text = selected  # 保存原文供差分对比
 
         try:
-            worker = editing_service.polish(selected, "简洁")
+            worker = self._ai_service.polish_text(selected, "简洁")
             worker.chunk_received.connect(self._on_ai_polish_chunk)
             worker.finished_signal.connect(self._on_ai_polish_finished)
             worker.error_signal.connect(self._on_ai_error)
@@ -2488,7 +2880,7 @@ class MainWindow(QMainWindow):
         self._ai_sel_end = cursor.selectionEnd()
 
         try:
-            worker = editing_service.rewrite(selected, "扩写")
+            worker = self._ai_service.rewrite_text(selected, "扩写")
             worker.chunk_received.connect(self._on_ai_rewrite_chunk)
             worker.finished_signal.connect(self._on_ai_rewrite_finished)
             worker.error_signal.connect(self._on_ai_error)
@@ -2534,7 +2926,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            worker = analysis_service.analyze_chapter(content, "")
+            worker = self._ai_service.analyze_chapter(content, "")
             # 分析结果一次性返回，在 finished 中处理
             worker.chunk_received.connect(self._on_ai_analyze_chunk)
             worker.finished_signal.connect(self._on_ai_analyze_finished)
@@ -2681,17 +3073,14 @@ class MainWindow(QMainWindow):
         try:
             chapter = self._txt_import_service.import_chapter_from_file(file_path, chapter_id)
             # 刷新编辑器
-            for cid, (tab_idx, container) in self._open_chapters.items():
-                if cid == chapter_id:
-                    # 找到编辑器并更新内容
-                    editor = container.editor
-                    editor.set_content(chapter.content or "")
-                    editor.set_modified(False)
-                    # 更新状态栏
-                    wc = editor.count_words()
-                    pc = editor.count_paragraphs()
-                    signal_bus.status_message.emit(f"已导入: {wc} 字, {pc} 段")
-                    break
+            editor = self._editor_service.get_editor(chapter_id)
+            if editor:
+                editor.set_content(chapter.content or "")
+                editor.set_modified(False)
+                # 更新状态栏
+                wc = editor.count_words()
+                pc = editor.count_paragraphs()
+                signal_bus.status_message.emit(f"已导入: {wc} 字, {pc} 段")
             signal_bus.word_count_updated.emit()
         except Exception as e:
             QMessageBox.critical(self, "导入失败", str(e))

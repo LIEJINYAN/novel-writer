@@ -1,6 +1,6 @@
 """分卷数据模型。"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean
 from models.database import ProjectBase
 
 
@@ -12,6 +12,6 @@ class Volume(ProjectBase):
     title = Column(String(200), nullable=False)
     description = Column(Text)
     sort_order = Column(Integer, default=0)
-    is_complete = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    is_complete = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)

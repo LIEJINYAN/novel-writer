@@ -1,201 +1,96 @@
-"""情节服务 - 弧线、节点、伏笔管理。"""
+"""情节服务 - 弧线、节点、伏笔管理（委托至 PlotTracker）。"""
 from __future__ import annotations
 from typing import Optional
-from sqlalchemy.orm import joinedload
 from models import PlotArc, PlotNode, PlotForeshadow
 from models.database import db_manager
+from core.tracking.plot_tracker import PlotTracker
 
 
 class PlotService:
+
+    def __init__(self, node_repo: Optional["PlotNodeRepository"] = None):
+        """可选的仓储依赖注入。
+
+        Args:
+            node_repo: 情节节点仓储实例（不传时使用 db_manager 直连）
+        """
+        self._node_repo = node_repo
+        self._tracker = PlotTracker(db_manager)
 
     # ===== 弧线 CRUD =====
 
     def create_arc(self, project_id: int, name: str,
                    description: str = "", sort_order: int = 0) -> PlotArc:
-        session = db_manager.get_project_session()
-        try:
-            arc = PlotArc(name=name,
-                          description=description, sort_order=sort_order)
-            session.add(arc)
-            session.commit()
-            session.refresh(arc)
-            return arc
-        finally:
-            session.close()
+        return self._tracker.create_arc(project_id, name, description, sort_order)
 
     def get_arc(self, arc_id: int) -> Optional[PlotArc]:
-        session = db_manager.get_project_session()
-        try:
-            return session.query(PlotArc).filter_by(id=arc_id).first()
-        finally:
-            session.close()
+        return self._tracker.get_arc(arc_id)
 
     def update_arc(self, arc_id: int, **data) -> Optional[PlotArc]:
-        session = db_manager.get_project_session()
-        try:
-            arc = session.query(PlotArc).filter_by(id=arc_id).first()
-            if not arc:
-                return None
-            for key, value in data.items():
-                if hasattr(arc, key):
-                    setattr(arc, key, value)
-            session.commit()
-            session.refresh(arc)
-            return arc
-        finally:
-            session.close()
+        return self._tracker.update_arc(arc_id, **data)
 
     def delete_arc(self, arc_id: int) -> bool:
-        session = db_manager.get_project_session()
-        try:
-            arc = session.query(PlotArc).filter_by(id=arc_id).first()
-            if not arc:
-                return False
-            session.delete(arc)
-            session.commit()
-            return True
-        finally:
-            session.close()
+        return self._tracker.delete_arc(arc_id)
 
     def list_arcs(self, project_id: int) -> list[PlotArc]:
-        session = db_manager.get_project_session()
-        try:
-            return session.query(PlotArc)\
-                .order_by(PlotArc.sort_order).all()
-        finally:
-            session.close()
+        return self._tracker.list_arcs(project_id)
 
     # ===== 节点 CRUD =====
 
-    def create_node(self, project_id: int, title: str,
-                    arc_id: Optional[int] = None, **data) -> PlotNode:
-        session = db_manager.get_project_session()
-        try:
-            node = PlotNode(name=title,
-                            parent_id=arc_id, **data)
-            session.add(node)
-            session.commit()
-            session.refresh(node)
-            return node
-        finally:
-            session.close()
+    def create_node(self, project_id: int, **data) -> PlotNode:
+        return self._tracker.add_plot_node(project_id, **data)
 
     def get_node(self, node_id: int) -> Optional[PlotNode]:
-        session = db_manager.get_project_session()
-        try:
-            return session.query(PlotNode).filter_by(id=node_id).first()
-        finally:
-            session.close()
+        return self._tracker.get_node(node_id)
 
     def update_node(self, node_id: int, **data) -> Optional[PlotNode]:
-        session = db_manager.get_project_session()
-        try:
-            node = session.query(PlotNode).filter_by(id=node_id).first()
-            if not node:
-                return None
-            # 兼容旧字段名
-            if "title" in data:
-                data["name"] = data.pop("title")
-            for key, value in data.items():
-                if hasattr(node, key):
-                    setattr(node, key, value)
-            session.commit()
-            session.refresh(node)
-            return node
-        finally:
-            session.close()
+        return self._tracker.update_node(node_id, **data)
 
     def delete_node(self, node_id: int) -> bool:
-        session = db_manager.get_project_session()
-        try:
-            node = session.query(PlotNode).filter_by(id=node_id).first()
-            if not node:
-                return False
-            session.delete(node)
-            session.commit()
-            return True
-        finally:
-            session.close()
+        return self._tracker.delete_node(node_id)
 
     def list_nodes(self, project_id: int, arc_id: Optional[int] = None,
                    status: Optional[str] = None) -> list[PlotNode]:
-        session = db_manager.get_project_session()
-        try:
-            query = session.query(PlotNode)
-            if arc_id is not None:
-                query = query.filter(PlotNode.parent_id == arc_id)
-            if status:
-                query = query.filter(PlotNode.status == status)
-            return query.order_by(PlotNode.sort_order).all()
-        finally:
-            session.close()
+        return self._tracker.list_nodes(project_id, arc_id, status)
 
     def get_nodes_by_arc(self, arc_id: int) -> list[PlotNode]:
-        return self.list_nodes(project_id=0, arc_id=arc_id)
-        # Arc ID 本身是唯一的，不需要 project_id 筛选
+        return self._tracker.list_nodes(project_id=0, arc_id=arc_id)
 
     def get_nodes_by_status(self, project_id: int, status: str) -> list[PlotNode]:
-        return self.list_nodes(project_id=project_id, status=status)
+        return self._tracker.list_nodes(project_id=project_id, status=status)
 
     # ===== 伏笔 CRUD =====
 
     def create_foreshadow(self, project_id: int, node_id: int,
                           description: str = "",
                           target_node_id: Optional[int] = None) -> PlotForeshadow:
-        session = db_manager.get_project_session()
-        try:
-            fs = PlotForeshadow(
-                node_id=node_id,
-                description=description, target_node_id=target_node_id,
-            )
-            session.add(fs)
-            session.commit()
-            session.refresh(fs)
-            return fs
-        finally:
-            session.close()
+        # 映射业务字段名到数据模型字段名：description -> content, node_id -> planted_chapter_id, target_node_id -> reveal_chapter_id
+        data = dict(content=description,
+                    planted_chapter_id=node_id,
+                    reveal_chapter_id=target_node_id)
+        return self._tracker.add_foreshadowing(project_id, **data)
 
     def get_foreshadow(self, foreshadow_id: int) -> Optional[PlotForeshadow]:
-        session = db_manager.get_project_session()
-        try:
-            return session.query(PlotForeshadow).filter_by(id=foreshadow_id).first()
-        finally:
-            session.close()
+        return self._tracker.get_foreshadowing(foreshadow_id)
 
     def update_foreshadow(self, foreshadow_id: int, **data) -> Optional[PlotForeshadow]:
-        session = db_manager.get_project_session()
-        try:
-            fs = session.query(PlotForeshadow).filter_by(id=foreshadow_id).first()
-            if not fs:
-                return None
-            for key, value in data.items():
-                if hasattr(fs, key):
-                    setattr(fs, key, value)
-            session.commit()
-            session.refresh(fs)
-            return fs
-        finally:
-            session.close()
+        # 映射业务字段名到数据模型字段名
+        mapped_data = {}
+        field_mapping = {
+            "description": "content",
+            "node_id": "planted_chapter_id",
+            "target_node_id": "reveal_chapter_id",
+        }
+        for key, value in data.items():
+            mapped_key = field_mapping.get(key, key)
+            mapped_data[mapped_key] = value
+        return self._tracker.update_foreshadowing(foreshadow_id, **mapped_data)
 
     def delete_foreshadow(self, foreshadow_id: int) -> bool:
-        session = db_manager.get_project_session()
-        try:
-            fs = session.query(PlotForeshadow).filter_by(id=foreshadow_id).first()
-            if not fs:
-                return False
-            session.delete(fs)
-            session.commit()
-            return True
-        finally:
-            session.close()
+        return self._tracker.delete_foreshadowing(foreshadow_id)
 
     def list_foreshadows(self, node_id: int) -> list[PlotForeshadow]:
-        session = db_manager.get_project_session()
-        try:
-            return session.query(PlotForeshadow).filter_by(node_id=node_id)\
-                .all()
-        finally:
-            session.close()
+        return self._tracker.list_foreshadowings(node_id)
 
 
 plot_service = PlotService()

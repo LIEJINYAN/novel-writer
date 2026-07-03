@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QIcon
 
 from services.character_service import character_service
+from services.chapter_service import ChapterService
 from utils.signal_bus import signal_bus
 
 
@@ -89,6 +90,9 @@ class CharacterPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("character_panel")
         self._project_id = None
+        self._chapter_service = ChapterService()
+        self._selected_character = None
+        self._updating_appearances = False
         self._init_ui()
         self._connect_signals()
 
@@ -163,7 +167,7 @@ class CharacterPanel(QWidget):
         self.list_widget.setObjectName("character_list")
         self.list_widget.setSpacing(4)
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
-        layout.addWidget(self.list_widget)
+        layout.addWidget(self.list_widget, 1)
 
         self.empty_label = QLabel("暂无角色\n点击「新建角色」创建")
         self.empty_label.setAlignment(Qt.AlignCenter)
@@ -172,13 +176,40 @@ class CharacterPanel(QWidget):
         self.empty_label.hide()
         layout.addWidget(self.empty_label)
 
+        # ---- 出场记录详情区域 ----
+        self._detail_widget = QWidget()
+        self._detail_widget.setObjectName("character_detail")
+        self._detail_widget.hide()
+        detail_layout = QVBoxLayout(self._detail_widget)
+        detail_layout.setContentsMargins(16, 4, 16, 8)
+        detail_layout.setSpacing(4)
+
+        freq_header_layout = QHBoxLayout()
+        self._appearance_header = QLabel("出场记录")
+        self._appearance_header.setStyleSheet("font-weight: bold; font-size: 12px;")
+        freq_header_layout.addWidget(self._appearance_header)
+
+        self._appearance_freq = QLabel("")
+        self._appearance_freq.setStyleSheet("font-size: 11px; color: #888;")
+        self._appearance_freq.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        freq_header_layout.addWidget(self._appearance_freq, 1)
+        detail_layout.addLayout(freq_header_layout)
+
+        self._appearance_list = QListWidget()
+        self._appearance_list.setSelectionMode(QListWidget.NoSelection)
+        detail_layout.addWidget(self._appearance_list)
+
+        layout.addWidget(self._detail_widget)
+
     def _connect_signals(self):
         self.search_input.textChanged.connect(self._on_filter_changed)
         self.role_combo.currentTextChanged.connect(self._on_filter_changed)
         self.status_combo.currentTextChanged.connect(self._on_filter_changed)
         self.add_btn.clicked.connect(self._on_add_character)
+        self.list_widget.itemClicked.connect(self._on_item_clicked)
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.list_widget.customContextMenuRequested.connect(self._on_context_menu)
+        self._appearance_list.itemChanged.connect(self._on_appearance_toggled)
 
         signal_bus.project_opened.connect(self._on_project_opened)
         signal_bus.project_closed.connect(self._on_project_closed)
@@ -282,6 +313,84 @@ class CharacterPanel(QWidget):
 
     def _clear_list(self):
         self.list_widget.clear()
+        self._hide_detail()
+
+    def _hide_detail(self):
+        """隐藏出场记录详情区域。"""
+        self._selected_character = None
+        self._detail_widget.hide()
+        self._appearance_list.clear()
+
+    def _on_item_clicked(self, item):
+        """单击角色列表项，显示出场记录。"""
+        widget = self.list_widget.itemWidget(item)
+        if widget and hasattr(widget, 'character'):
+            self._selected_character = widget.character
+            self._refresh_appearances()
+
+    def _refresh_appearances(self):
+        """刷新出场记录列表（所有章节 + 勾选状态）。"""
+        if not self._project_id or not self._selected_character:
+            self._hide_detail()
+            return
+
+        # 获取所有章节和已有的出场记录
+        chapters = self._chapter_service.list_chapters(self._project_id)
+        appearances = character_service.get_appearances(self._selected_character.id)
+        appeared_chapter_ids = {a["chapter_id"] for a in appearances}
+
+        self._detail_widget.show()
+        self._appearance_list.clear()
+
+        # 更新频率统计
+        total = len(chapters)
+        appeared = len(appearances)
+        if total == 0:
+            self._appearance_freq.setText("暂无章节")
+            return
+
+        self._appearance_freq.setText(f"第 {appeared} 章出场 · 共 {total} 章")
+
+        # 填充所有章节的勾选列表
+        self._updating_appearances = True
+        try:
+            for ch in chapters:
+                title = ch.title or f"第 {ch.chapter_number} 章"
+                label = f"第{ch.chapter_number}章 {title}"
+                item = QListWidgetItem(label)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setData(Qt.UserRole, ch.id)  # 存 chapter_id
+                if ch.id in appeared_chapter_ids:
+                    item.setCheckState(Qt.Checked)
+                else:
+                    item.setCheckState(Qt.Unchecked)
+                self._appearance_list.addItem(item)
+        finally:
+            self._updating_appearances = False
+
+    def _on_appearance_toggled(self, item):
+        """勾选状态变更时持久化出场记录。"""
+        if self._updating_appearances or not self._selected_character:
+            return
+
+        chapter_id = item.data(Qt.UserRole)
+        if chapter_id is None:
+            return
+
+        char_id = self._selected_character.id
+        checked = item.checkState() == Qt.Checked
+
+        if checked:
+            character_service.add_appearance(char_id, chapter_id)
+        else:
+            character_service.remove_appearance(char_id, chapter_id)
+
+        # 更新频率统计
+        appearances = character_service.get_appearances(char_id)
+        total = self._appearance_list.count()
+        self._appearance_freq.setText(
+            f"第 {len(appearances)} 章出场 · 共 {total} 章"
+        )
 
     def clear(self):
         self._project_id = None

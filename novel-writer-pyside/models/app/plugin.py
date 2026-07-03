@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean
 
 from models.database import AppBase
 
@@ -15,7 +15,7 @@ class Plugin(AppBase):
     description = Column(Text)
     author = Column(String(100))
     path = Column(String(500), nullable=False)
-    is_enabled = Column(Integer, default=1)
+    is_enabled = Column(Boolean, default=True)
     config = Column(Text)
     installed_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)

@@ -266,16 +266,16 @@ class ExportService:
             "consistency": {"physicalTraits": {}, "personalityTraits": {}, "speechPatterns": {}, "warnings": []},
         }
         for c in chars:
-            if c.role_type == "主角":
+            if c.role == "主角":
                 data["protagonist"] = {
                     "name": c.name,
-                    "currentStatus": {"alive": True, "health": c.status or "良好", "mentalState": "正常", "location": ""},
-                    "development": {"arc": c.arc or "", "milestones": [], "currentPhase": ""},
+                    "currentStatus": {"alive": True, "health": "良好", "mentalState": "正常", "location": ""},
+                    "development": {"arc": c.character_arc or "", "milestones": [], "currentPhase": ""},
                 }
                 data["characterGroups"]["active"].append(c.name)
             else:
                 data["supportingCharacters"][c.name] = {
-                    "role": c.role_type or "配角",
+                    "role": c.role or "配角",
                     "importance": "medium",
                     "status": {"alive": True, "lastSeen": {"chapter": None, "location": ""}},
                     "arc": {"planned": c.notes or "", "current": ""},
@@ -286,7 +286,7 @@ class ExportService:
 
     def _export_tracking_plot(self, session, project_id: int, tracking_dir: Path):
         """导出 plot-tracker.json。"""
-        arcs = session.query(PlotArc).all()
+        arcs = session.query(PlotArc).filter(PlotArc.parent_id.is_(None)).all()
         data = {
             "novel": "",
             "lastUpdated": datetime.now().isoformat(),
@@ -303,7 +303,7 @@ class ExportService:
         }
         # 弧线→plotlines
         for arc in arcs:
-            nodes = session.query(PlotNode).filter_by(arc_id=arc.id).order_by(PlotNode.sort_order).all()
+            nodes = session.query(PlotNode).filter_by(parent_id=arc.id).order_by(PlotNode.sort_order).all()
             arc_entry = {
                 "name": arc.name,
                 "description": arc.description or "",
@@ -380,12 +380,12 @@ class ExportService:
         protagonist_name = ""
         supporting = {}
         for c in chars:
-            if c.role_type == "主角" and not protagonist_name:
+            if c.role == "主角" and not protagonist_name:
                 protagonist_name = c.name
             else:
                 supporting[c.name] = {
                     "aliases": [],
-                    "note": c.notes or "",
+                    "note": c.background or "",
                 }
         data = {
             "version": "1.0",

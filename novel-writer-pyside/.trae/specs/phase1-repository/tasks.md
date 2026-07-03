@@ -97,3 +97,19 @@
   - `programmatic` TR-8.1: 所有仓储模块导入测试通过
   - `programmatic` TR-8.2: 应用启动正常，无导入错误
 - **Notes**: 使用 `python -c "from core.repositories import *"` 验证
+
+## [x] Task 9: 创建依赖注入容器并接入服务层
+- **Priority**: medium
+- **Depends On**: Task 1-8
+- **Description**: 
+  - 创建 `core/di/container.py`，实现 `ServiceContainer` 类
+  - 管理仓储实例的创建和缓存（懒加载）
+  - 提供 `register()` / `get()` 接口支持自定义注入
+  - 为 `ChapterService`、`CharacterService`、`PlotService` 添加可选的构造函数注入
+  - 默认全局容器 `default_container`
+- **Acceptance Criteria Addressed**: AC-3
+- **Test Requirements**:
+  - `programmatic` TR-9.1: `ServiceContainer` 可正常导入和实例化
+  - `programmatic` TR-9.2: 注入仓储的服务可正常执行 CRUD 操作
+  - `programmatic` TR-9.3: 不注入时服务行为不变（向后兼容）
+- **Notes**: 注入为可选项，不破坏现有调用代码

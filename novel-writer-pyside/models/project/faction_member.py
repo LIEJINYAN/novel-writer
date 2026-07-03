@@ -1,6 +1,6 @@
 """势力成员数据模型。"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, UniqueConstraint
 from models.database import ProjectBase
 
 
@@ -13,9 +13,9 @@ class FactionMember(ProjectBase):
     role_in_faction = Column(String(100))
     join_reason = Column(Text)
     joined_chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="SET NULL"))
-    is_core_member = Column(Integer, default=0)
+    is_core_member = Column(Boolean, default=False)
     sort_order = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("faction_id", "character_id"),

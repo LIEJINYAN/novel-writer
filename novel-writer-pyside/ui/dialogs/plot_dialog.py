@@ -218,7 +218,7 @@ class PlotDialog(QDialog):
         self.foreshadow_table.setRowCount(len(foreshadows))
 
         for row, fs in enumerate(foreshadows):
-            desc_item = QTableWidgetItem(fs.description)
+            desc_item = QTableWidgetItem(fs.content)
             desc_item.setFlags(desc_item.flags() & ~Qt.ItemIsEditable)
             self.foreshadow_table.setItem(row, 0, desc_item)
 
@@ -316,7 +316,7 @@ class PlotDialog(QDialog):
         if fs_id:
             fs = plot_service.get_foreshadow(fs_id)
             if fs:
-                desc_edit.setPlainText(fs.description)
+                desc_edit.setPlainText(fs.content)
                 if fs.reveal_chapter_id:
                     idx = target_combo.findData(fs.reveal_chapter_id)
                     if idx >= 0:

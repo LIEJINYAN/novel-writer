@@ -11,7 +11,7 @@ sys.path.insert(0, str(project_root))
 
 from sqlalchemy import engine_from_config, pool
 from alembic.config import Config
-from models.database import Base
+from models.database import AppBase, ProjectBase
 
 # Alembic Config 对象
 config = context.config
@@ -21,7 +21,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # 目标元数据（用于自动生成迁移）
-target_metadata = Base.metadata
+target_metadata = [AppBase.metadata, ProjectBase.metadata]
 
 
 def run_migrations_offline() -> None:

@@ -15,4 +15,4 @@ class RelationshipHistory(ProjectBase):
     new_relation = Column(String(100))
     description = Column(Text)
     impact = Column(String(20), default="medium")
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)

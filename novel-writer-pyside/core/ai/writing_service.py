@@ -3,7 +3,7 @@ from typing import Optional
 from .base import Message, AIConfig, AIProviderError
 from .manager import ai_manager
 from .ai_worker import AIWorker
-from .prompts.registry import get_template
+from .prompt_templates.registry import get_template
 
 
 class WritingAIService:
@@ -33,9 +33,12 @@ class WritingAIService:
 
         # 加载章节和项目数据
         from models import db_manager, Chapter, Project
+
+        # Chapter 在项目级 DB，Project 在应用级 DB
+        p_session = db_manager.get_project_session()
         session = db_manager.get_session()
         try:
-            chapter = session.query(Chapter).filter_by(id=chapter_id).first()
+            chapter = p_session.query(Chapter).filter_by(id=chapter_id).first()
             project = session.query(Project).filter_by(id=project_id).first()
 
             if not chapter:
@@ -43,15 +46,15 @@ class WritingAIService:
 
             # 构建模板上下文
             # 加载前 3 章内容作为上下文
-            prev_chapters = session.query(Chapter)\
-                .filter(Chapter.project_id == project_id, Chapter.id < chapter_id)\
+            prev_chapters = p_session.query(Chapter)\
+                .filter(Chapter.id < chapter_id)\
                 .order_by(Chapter.id.desc())\
                 .limit(3)\
                 .all()
             prev_chapters.reverse()  # 按正序排列
             prev_content = ""
             for ch in prev_chapters:
-                prev_content += f"【第 {ch.order or ch.id} 章 {ch.title or ''}】\n{ch.content or ''}\n\n"
+                prev_content += f"【第 {ch.chapter_number or ch.id} 章 {ch.title or ''}】\n{ch.content or ''}\n\n"
 
             context = {
                 "title": chapter.title or "",
@@ -62,6 +65,7 @@ class WritingAIService:
                 "word_count": chapter.word_count or 0,
             }
         finally:
+            p_session.close()
             session.close()
 
         # 获取续写模板并渲染
@@ -69,7 +73,7 @@ class WritingAIService:
         if template is None:
             raise AIProviderError("找不到续写模板")
 
-        message_dicts = template.render(context)
+        message_dicts = template.build_messages(**context)
         # 转换 dict 为 Message 对象
         messages = [Message(role=m["role"], content=m["content"]) for m in message_dicts]
 

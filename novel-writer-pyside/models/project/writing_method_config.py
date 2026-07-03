@@ -11,5 +11,5 @@ class WritingMethodConfig(ProjectBase):
     method_name = Column(String(50), nullable=False)
     stage_config = Column(Text)
     scene_templates = Column(Text)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)

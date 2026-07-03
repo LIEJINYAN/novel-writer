@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QComboBox, QLabel, QPushButton,
     QFrame, QScrollArea, QTextEdit,
-    QRadioButton,
+    QRadioButton, QSpinBox,
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtWidgets import QSlider
@@ -191,6 +191,25 @@ class AIPanel(QWidget):
         temp_row.addWidget(self._temp_value_label)
 
         layout.addLayout(temp_row)
+
+        # Max Tokens 行
+        mt_row = QHBoxLayout()
+        mt_row.setSpacing(4)
+        mt_label = QLabel("Max Tokens")
+        mt_label.setObjectName("ai_max_tokens_label")
+        mt_label.setStyleSheet("font-size: 9px; color: #565f89;")
+        mt_row.addWidget(mt_label)
+
+        self._max_tokens_spin = QSpinBox()
+        self._max_tokens_spin.setRange(100, 128000)
+        self._max_tokens_spin.setValue(4096)
+        self._max_tokens_spin.setSingleStep(1000)
+        self._max_tokens_spin.setFixedWidth(100)
+        self._max_tokens_spin.setObjectName("ai_max_tokens_spin")
+        mt_row.addWidget(self._max_tokens_spin)
+
+        mt_row.addStretch()
+        layout.addLayout(mt_row)
 
         # 续写操作行：续写按钮 + 字数选择
         continue_row = QHBoxLayout()
@@ -503,6 +522,12 @@ class AIPanel(QWidget):
             return int(wc_text)
         except ValueError:
             return 2000
+
+    def get_max_tokens(self) -> int:
+        """获取当前 Max Tokens 设置。"""
+        if hasattr(self, '_max_tokens_spin'):
+            return self._max_tokens_spin.value()
+        return 4096
 
     def add_system_message(self, text: str):
         """在对话区添加系统消息。"""

@@ -141,7 +141,7 @@ class PreviewPage(QWizardPage):
     def set_preview(self, genre: str, method_name: str,
                     protagonist: str, keywords: str):
         """设置预览信息。"""
-        from core.ai.writing_methods.advisor import method_advisor
+        from core.methods.advisor import method_advisor
 
         method = method_advisor.get_method(method_name)
         text = f"【项目概要】\n\n"
@@ -186,7 +186,7 @@ class CreationWizard(QWizard):
         """页面切换时更新推荐。"""
         if self.page(page_id) == self._method_page:
             genre = self._genre_page.get_genre()
-            from core.ai.writing_methods.advisor import method_advisor
+            from core.methods.advisor import method_advisor
             recs = method_advisor.recommend(genre, "新手", "长篇")
             self._method_page.set_recommendations(recs)
 

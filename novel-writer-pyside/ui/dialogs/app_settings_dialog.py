@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from services.app_config_service import app_config_service
-from app.config import AppConfig
 
 
 class AppSettingsDialog(QDialog):
@@ -95,10 +94,7 @@ class AppSettingsDialog(QDialog):
         )
 
     def _on_save(self):
-        """保存设置到 DB 和运行时配置。"""
-        config = AppConfig()
-
-        # DB 持久化
+        """保存设置到 app_config 表（权威来源）。"""
         app_config_service.set("theme", self._theme_combo.currentText())
         app_config_service.set("language", self._lang_combo.currentText())
         app_config_service.set("auto_save_interval",
@@ -107,10 +103,6 @@ class AppSettingsDialog(QDialog):
                                 str(self._font_size_spin.value()))
         app_config_service.set("editor_tab_width",
                                 str(self._tab_width_spin.value()))
-
-        # 运行时配置
-        config.set("theme", self._theme_combo.currentText())
-        config.set("language", self._lang_combo.currentText())
 
         QMessageBox.information(self, "设置已保存",
                                 "部分设置（如主题、语言）将在下次启动时生效。")

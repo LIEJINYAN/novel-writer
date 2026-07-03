@@ -1,6 +1,6 @@
 """角色状态数据模型。"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Index
 from models.database import ProjectBase
 
 
@@ -10,7 +10,7 @@ class CharacterState(ProjectBase):
     id = Column(Integer, primary_key=True, autoincrement=True)
     character_id = Column(Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False)
     chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="SET NULL"))
-    is_alive = Column(Integer, default=1)
+    is_alive = Column(Boolean, default=True)
     health_status = Column(String(50), default="良好")
     mental_state = Column(String(50), default="正常")
     location = Column(String(200))
@@ -19,4 +19,9 @@ class CharacterState(ProjectBase):
     next_goal = Column(Text)
     status_snapshot = Column(Text)
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_character_states_character_id", "character_id"),
+        Index("idx_character_states_chapter_id", "chapter_id"),
+    )

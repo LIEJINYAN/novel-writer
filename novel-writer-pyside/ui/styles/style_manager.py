@@ -1,4 +1,5 @@
 """主题样式管理器。"""
+import os
 from pathlib import Path
 
 class StyleManager:
@@ -30,10 +31,17 @@ class StyleManager:
         return ""
     
     def apply_theme(self, app, theme_name: str = "dark"):
-        """将主题应用到 QApplication。"""
-        qss = self.load_theme(theme_name)
-        if qss:
-            app.setStyleSheet(qss)
+        """应用主题 QSS。"""
+        theme_map = {
+            "dark": "ui/styles/dark.qss",
+            "light": "ui/styles/light.qss",
+            "sepia": "ui/styles/sepia.qss",
+        }
+        qss_path = theme_map.get(theme_name)
+        if qss_path and os.path.exists(qss_path):
+            with open(qss_path, "r", encoding="utf-8") as f:
+                app.setStyleSheet(f.read())
+        self._current_theme = theme_name
 
 
 style_manager = StyleManager()

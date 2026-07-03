@@ -16,5 +16,5 @@ class WorldSetting(ProjectBase):
     tags = Column(Text)
     related_characters = Column(Text)
     sort_order = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)

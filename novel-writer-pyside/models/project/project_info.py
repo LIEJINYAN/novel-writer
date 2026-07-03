@@ -21,5 +21,5 @@ class ProjectInfo(ProjectBase):
     language = Column(String(20), default="zh-CN")
     status = Column(String(20), default="active")
     config_version = Column(String(20), default="1.0.0")
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)

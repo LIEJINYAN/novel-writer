@@ -10,6 +10,58 @@ from utils.signal_bus import signal_bus
 from ui.dialogs.relationship_dialog import RelationshipDialog
 from ui.dialogs.faction_dialog import FactionDialog
 
+# 延迟导入：RelationScene 使用的 Qt 图形类
+from PySide6.QtWidgets import QGraphicsScene
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QPen, QBrush, QColor, QFont
+
+
+class RelationScene(QGraphicsScene):
+    """关系图谱场景。"""
+    def __init__(self, relations: list, parent=None):
+        super().__init__(parent)
+        self._nodes = {}  # character_name -> (cx, cy, ellipse_item)
+        self._lines = []  # QGraphicsLineItem list
+        self._load_data(relations)
+
+    def _load_data(self, relations):
+        self.clear()
+        self._nodes.clear()
+        # 收集所有角色
+        chars = set()
+        for rel in relations:
+            chars.add(rel.get('character_a_name', ''))
+            chars.add(rel.get('character_b_name', ''))
+
+        # 布局节点（环形）
+        from math import cos, sin, pi
+        center = QPointF(300, 300)
+        radius = 200
+        angle_step = 2 * pi / max(len(chars), 1)
+        for i, c in enumerate(chars):
+            angle = i * angle_step - pi / 2
+            x = center.x() + radius * cos(angle) - 30
+            y = center.y() + radius * sin(angle) - 15
+            item = self.addEllipse(x, y, 60, 30, QPen(QColor("#7c7cff"), 2), QBrush(QColor("#3a3a6a")))
+            text = self.addSimpleText(c, QFont("Microsoft YaHei", 10))
+            text.setPos(x + 30 - text.boundingRect().width() / 2, y + 7)
+            self._nodes[c] = (x + 30, y + 15, item)
+
+        # 绘制连线
+        for rel in relations:
+            a = rel.get('character_a_name', '')
+            b = rel.get('character_b_name', '')
+            rel_type = rel.get('relationship_type', '')
+            if a in self._nodes and b in self._nodes and a != b:
+                x1, y1, _ = self._nodes[a]
+                x2, y2, _ = self._nodes[b]
+                line = self.addLine(x1, y1, x2, y2, QPen(QColor("#8b5cf6"), 2))
+                self._lines.append(line)
+                # 关系类型标签（中点）
+                mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+                label = self.addSimpleText(rel_type, QFont("Microsoft YaHei", 8))
+                label.setPos(mx - label.boundingRect().width() / 2, my - 10)
+
 
 class RelationshipPanel(QWidget):
     """侧边栏关系与派系列表。"""
@@ -47,17 +99,16 @@ class RelationshipPanel(QWidget):
         # 标签页
         self._tab_widget = QTabWidget()
 
-        # 关系表标签页
-        self._rel_table = QTableWidget()
-        self._rel_table.setColumnCount(4)
-        self._rel_table.setHorizontalHeaderLabels(["角色 A", "角色 B", "类型", "强度"])
-        self._rel_table.horizontalHeader().setStretchLastSection(True)
-        self._rel_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._rel_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self._rel_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self._rel_table.customContextMenuRequested.connect(self._on_rel_context_menu)
-        self._rel_table.itemDoubleClicked.connect(self._on_edit_relationship)
-        self._tab_widget.addTab(self._rel_table, "关系")
+        # 关系图谱标签页
+        from PySide6.QtWidgets import QGraphicsView
+        from PySide6.QtGui import QPainter
+        self._graphics_view = QGraphicsView()
+        self._graphics_view.setRenderHint(QPainter.Antialiasing)
+        self._graphics_view.setDragMode(QGraphicsView.ScrollHandDrag)
+        self._graphics_view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self._scene = RelationScene([])
+        self._graphics_view.setScene(self._scene)
+        self._tab_widget.addTab(self._graphics_view, "关系")
 
         # 派系列表标签页
         self._fac_table = QTableWidget()
@@ -81,13 +132,15 @@ class RelationshipPanel(QWidget):
     def _on_project_closed(self):
         """信号：项目关闭。"""
         self._project_id = None
-        self._rel_table.setRowCount(0)
+        self._scene = RelationScene([])
+        self._graphics_view.setScene(self._scene)
         self._fac_table.setRowCount(0)
 
     def clear(self):
         """清空面板数据（兼容 main_window 直接调用）。"""
         self._project_id = None
-        self._rel_table.setRowCount(0)
+        self._scene = RelationScene([])
+        self._graphics_view.setScene(self._scene)
         self._fac_table.setRowCount(0)
 
     def _load_data(self):
@@ -96,18 +149,14 @@ class RelationshipPanel(QWidget):
         self._load_factions()
 
     def _load_relationships(self, search: str = ""):
-        """加载关系列表。"""
-        self._rel_table.setRowCount(0)
+        """加载关系图谱。"""
         if not self._project_id:
+            self._scene = RelationScene([])
+            self._graphics_view.setScene(self._scene)
             return
         rels = relationship_service.list(self._project_id, search=search)
-        self._rel_table.setRowCount(len(rels))
-        for row, r in enumerate(rels):
-            self._rel_table.setItem(row, 0, QTableWidgetItem(r["character_a_name"]))
-            self._rel_table.setItem(row, 1, QTableWidgetItem(r["character_b_name"]))
-            self._rel_table.setItem(row, 2, QTableWidgetItem(r["relationship_type"]))
-            self._rel_table.setItem(row, 3, QTableWidgetItem(str(r["intensity"])))
-            self._rel_table.item(row, 0).setData(256, r["id"])
+        self._scene = RelationScene(rels)
+        self._graphics_view.setScene(self._scene)
 
     def _load_factions(self):
         """加载派系列表。"""

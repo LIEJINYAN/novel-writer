@@ -1,11 +1,11 @@
 """AI 设置对话框。"""
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QListWidget, QListWidgetItem, QLineEdit, QComboBox,
-    QDoubleSpinBox, QSpinBox, QPushButton, QLabel,
-    QCheckBox, QWidget, QFrame, QMessageBox
+    QLineEdit, QComboBox, QSpinBox, QPushButton, QLabel,
+    QCheckBox, QWidget, QFrame, QMessageBox,
+    QGroupBox, QSlider, QDialogButtonBox
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSettings
+from PySide6.QtCore import Qt, QThread, Signal
 from core.ai.manager import ai_manager
 from core.ai.base import AIProviderError
 
@@ -67,7 +67,7 @@ class AISettingsDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("ai_settings_dialog")
         self.setWindowTitle("AI 设置")
-        self.setMinimumSize(700, 450)
+        self.setFixedSize(600, 500)
         self._current_provider_name = None
         self._test_worker = None
         self._fetch_worker = None
@@ -78,31 +78,16 @@ class AISettingsDialog(QDialog):
 
     def _init_ui(self):
         """初始化 UI。"""
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
 
-        # 左侧：提供商列表
-        left_frame = QFrame()
-        left_layout = QVBoxLayout(left_frame)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        # ===== 分组框：AI 提供商 =====
+        provider_group = QGroupBox("AI 提供商")
+        provider_layout = QVBoxLayout(provider_group)
 
-        left_label = QLabel("AI 提供商")
-        left_label.setStyleSheet("font-weight: bold; margin-bottom: 8px;")
-        left_layout.addWidget(left_label)
-
-        self._provider_list = QListWidget()
-        self._provider_list.setObjectName("ai_provider_list")
-        self._provider_list.setMinimumWidth(180)
-        self._provider_list.currentRowChanged.connect(self._on_provider_selected)
-        left_layout.addWidget(self._provider_list)
-
-        layout.addWidget(left_frame)
-
-        # 右侧：配置表单
-        right_frame = QFrame()
-        right_layout = QVBoxLayout(right_frame)
-
-        form_layout = QFormLayout()
-        form_layout.setSpacing(10)
+        self._provider_combo = QComboBox()
+        self._provider_combo.setObjectName("ai_provider_combo")
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_selected)
+        provider_layout.addWidget(self._provider_combo)
 
         # API Key
         api_key_layout = QHBoxLayout()
@@ -114,14 +99,28 @@ class AISettingsDialog(QDialog):
         self._toggle_key_btn.clicked.connect(self._toggle_api_key_visibility)
         api_key_layout.addWidget(self._api_key_input)
         api_key_layout.addWidget(self._toggle_key_btn)
-        form_layout.addRow("API Key:", api_key_layout)
+        provider_layout.addWidget(QLabel("API Key:"))
+        provider_layout.addLayout(api_key_layout)
 
         # API Base
         self._api_base_input = QLineEdit()
-        self._api_base_input.setPlaceholderText("API 地址（留空使用默认值）")
-        form_layout.addRow("API Base:", self._api_base_input)
+        self._api_base_input.setPlaceholderText("自定义 API 地址（可选）")
+        provider_layout.addWidget(QLabel("API 地址:"))
+        provider_layout.addWidget(self._api_base_input)
 
-        # 模型
+        # 测试连接
+        self._test_btn = QPushButton("测试连接")
+        self._test_btn.setObjectName("ai_test_btn")
+        self._test_btn.clicked.connect(self._on_test_connection)
+        provider_layout.addWidget(self._test_btn)
+
+        layout.addWidget(provider_group)
+
+        # ===== 分组框：生成参数 =====
+        params_group = QGroupBox("生成参数")
+        params_layout = QFormLayout(params_group)
+
+        # 模型选择
         model_layout = QHBoxLayout()
         self._model_combo = QComboBox()
         self._model_combo.setEditable(True)
@@ -131,92 +130,79 @@ class AISettingsDialog(QDialog):
         self._fetch_models_btn.clicked.connect(self._on_fetch_models)
         model_layout.addWidget(self._model_combo)
         model_layout.addWidget(self._fetch_models_btn)
-        form_layout.addRow("默认模型:", model_layout)
+        params_layout.addRow("模型:", model_layout)
 
-        # 温度
-        self._temperature_input = QDoubleSpinBox()
-        self._temperature_input.setRange(0.0, 2.0)
-        self._temperature_input.setSingleStep(0.1)
-        self._temperature_input.setValue(0.8)
-        form_layout.addRow("温度:", self._temperature_input)
+        # 温度滑块
+        temp_layout = QHBoxLayout()
+        self._temp_slider = QSlider(Qt.Horizontal)
+        self._temp_slider.setRange(0, 200)
+        self._temp_slider.setValue(70)
+        self._temp_slider.valueChanged.connect(self._on_temp_slider_changed)
+        self._temp_label = QLabel("0.7")
+        self._temp_label.setFixedWidth(30)
+        temp_layout.addWidget(self._temp_slider)
+        temp_layout.addWidget(self._temp_label)
+        params_layout.addRow("温度:", temp_layout)
 
         # Max Tokens
         self._max_tokens_input = QSpinBox()
-        self._max_tokens_input.setRange(256, 32768)
+        self._max_tokens_input.setRange(100, 128000)
         self._max_tokens_input.setSingleStep(256)
-        self._max_tokens_input.setValue(4096)
-        form_layout.addRow("Max Tokens:", self._max_tokens_input)
+        self._max_tokens_input.setValue(4000)
+        params_layout.addRow("Max Tokens:", self._max_tokens_input)
+
+        layout.addWidget(params_group)
 
         # ========== 分隔线 ==========
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
-        form_layout.addRow(separator)
+        layout.addWidget(separator)
 
         # 通用设置标题
         general_label = QLabel("通用设置")
         general_label.setStyleSheet("font-weight: bold;")
-        form_layout.addRow(general_label)
+        layout.addWidget(general_label)
 
-        # 自动保存间隔
+        # 通用设置表单
+        general_form = QFormLayout()
         self._autosave_interval_input = QSpinBox()
         self._autosave_interval_input.setRange(10, 300)
         self._autosave_interval_input.setSingleStep(10)
         self._autosave_interval_input.setSuffix(" 秒")
         self._autosave_interval_input.setValue(30)
-        form_layout.addRow("自动保存间隔：", self._autosave_interval_input)
+        general_form.addRow("自动保存间隔：", self._autosave_interval_input)
 
-        # 撤销栈深度
         self._undo_stack_depth_input = QSpinBox()
         self._undo_stack_depth_input.setRange(10, 500)
         self._undo_stack_depth_input.setSingleStep(10)
         self._undo_stack_depth_input.setSuffix(" 步")
         self._undo_stack_depth_input.setValue(100)
-        form_layout.addRow("撤销栈深度：", self._undo_stack_depth_input)
+        general_form.addRow("撤销栈深度：", self._undo_stack_depth_input)
+        layout.addLayout(general_form)
 
-        right_layout.addLayout(form_layout)
-
-        # 测试连接 + 设为当前
-        btn_layout = QHBoxLayout()
-        self._test_btn = QPushButton("测试连接")
-        self._test_btn.setObjectName("ai_test_btn")
-        self._test_btn.clicked.connect(self._on_test_connection)
-        btn_layout.addWidget(self._test_btn)
-
+        # 设为当前 + 状态标签
+        bottom_layout = QHBoxLayout()
         self._set_active_check = QCheckBox("设为当前提供商")
-        btn_layout.addWidget(self._set_active_check)
-        btn_layout.addStretch()
-        right_layout.addLayout(btn_layout)
-
-        # 状态标签
+        bottom_layout.addWidget(self._set_active_check)
+        bottom_layout.addStretch()
         self._status_label = QLabel("")
         self._status_label.setStyleSheet("color: gray; font-size: 12px;")
-        right_layout.addWidget(self._status_label)
+        bottom_layout.addWidget(self._status_label)
+        layout.addLayout(bottom_layout)
 
-        right_layout.addStretch()
-
-        # 底部按钮
-        bottom_layout = QHBoxLayout()
-        bottom_layout.addStretch()
-
-        save_btn = QPushButton("保存")
-        save_btn.setObjectName("ai_save_btn")
-        save_btn.setMinimumWidth(80)
-        save_btn.clicked.connect(self._on_save)
-        bottom_layout.addWidget(save_btn)
-
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setMinimumWidth(80)
-        cancel_btn.clicked.connect(self.reject)
-        bottom_layout.addWidget(cancel_btn)
-
-        right_layout.addLayout(bottom_layout)
-
-        layout.addWidget(right_frame, 1)
+        # ===== QDialogButtonBox =====
+        self._button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        self._button_box.accepted.connect(self._on_save)
+        self._button_box.rejected.connect(self.reject)
+        layout.addWidget(self._button_box)
 
     def _load_providers(self):
         """加载提供商列表。"""
-        self._provider_list.clear()
+        self._provider_combo.blockSignals(True)
+        self._provider_combo.clear()
         providers = ai_manager.list_providers()
 
         for p in providers:
@@ -224,22 +210,20 @@ class AISettingsDialog(QDialog):
             prefix = "★ " if p["is_active"] else ""
             status = "●" if p["is_configured"] else "○"
             text = f"{prefix}{p['display_name']} {status}"
+            self._provider_combo.addItem(text, p["name"])
 
-            item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, p["name"])
-            self._provider_list.addItem(item)
+        self._provider_combo.blockSignals(False)
 
         # 默认选中第一个
-        if self._provider_list.count() > 0:
-            self._provider_list.setCurrentRow(0)
+        if self._provider_combo.count() > 0:
+            self._provider_combo.setCurrentIndex(0)
 
-    def _on_provider_selected(self, row: int):
+    def _on_provider_selected(self, index: int):
         """选择提供商时加载配置。"""
-        if row < 0 or row >= self._provider_list.count():
+        if index < 0 or index >= self._provider_combo.count():
             return
 
-        item = self._provider_list.item(row)
-        provider_name = item.data(Qt.UserRole)
+        provider_name = self._provider_combo.currentData(Qt.UserRole)
         self._current_provider_name = provider_name
 
         # 获取配置
@@ -250,8 +234,12 @@ class AISettingsDialog(QDialog):
         if not provider_info:
             return
 
-        # 填充表单
-        self._api_key_input.setText(config.get("api_key", ""))
+        # 填充表单（优先从加密 Vault 加载 API Key）
+        from core.security.vault import vault
+        if vault.has_api_key(provider_name):
+            self._api_key_input.setText(vault.get_api_key(provider_name))
+        else:
+            self._api_key_input.setText(config.get("api_key", ""))
         self._api_base_input.setText(config.get("api_base", "") or provider_info["default_api_base"])
         self._api_base_input.setPlaceholderText(provider_info["default_api_base"])
 
@@ -264,26 +252,29 @@ class AISettingsDialog(QDialog):
         if current_model:
             self._model_combo.setCurrentText(current_model)
 
-        self._temperature_input.setValue(config.get("temperature", 0.8))
-        self._max_tokens_input.setValue(config.get("max_tokens", 4096))
+        self._temp_slider.setValue(int(config.get("temperature", 0.8) * 100))
+        self._on_temp_slider_changed(self._temp_slider.value())
+        self._max_tokens_input.setValue(config.get("max_tokens", 4000))
         self._set_active_check.setChecked(provider_info["is_active"])
 
         # 清除状态
         self._status_label.setText("")
 
     def _load_general_settings(self):
-        """从 QSettings 加载通用设置。"""
-        settings = QSettings("NovelWriter", "NovelWriter")
-        interval = settings.value("autosave_interval", 30, type=int)
+        """从 app_config 表加载通用设置。"""
+        from services.app_config_service import app_config_service
+        interval = app_config_service.get_int("auto_save_interval", 30)
         self._autosave_interval_input.setValue(interval)
-        depth = settings.value("undo_stack_depth", 100, type=int)
+        depth = app_config_service.get_int("undo_stack_depth", 100)
         self._undo_stack_depth_input.setValue(depth)
 
     def _save_general_settings(self):
-        """保存通用设置到 QSettings。"""
-        settings = QSettings("NovelWriter", "NovelWriter")
-        settings.setValue("autosave_interval", self._autosave_interval_input.value())
-        settings.setValue("undo_stack_depth", self._undo_stack_depth_input.value())
+        """保存通用设置到 app_config 表。"""
+        from services.app_config_service import app_config_service
+        app_config_service.set("auto_save_interval",
+                               str(self._autosave_interval_input.value()))
+        app_config_service.set("undo_stack_depth",
+                               str(self._undo_stack_depth_input.value()))
 
     def _toggle_api_key_visibility(self):
         """切换 API Key 显示/隐藏。"""
@@ -293,6 +284,10 @@ class AISettingsDialog(QDialog):
         else:
             self._api_key_input.setEchoMode(QLineEdit.Password)
             self._toggle_key_btn.setText("显示")
+
+    def _on_temp_slider_changed(self, value: int):
+        """温度滑块值变化时更新标签。"""
+        self._temp_label.setText(f"{value / 100.0:.1f}")
 
     def _on_test_connection(self):
         """测试连接。"""
@@ -365,7 +360,7 @@ class AISettingsDialog(QDialog):
         api_key = self._api_key_input.text().strip()
         api_base = self._api_base_input.text().strip()
         model = self._model_combo.currentText().strip()
-        temperature = self._temperature_input.value()
+        temperature = self._temp_slider.value() / 100.0
         max_tokens = self._max_tokens_input.value()
 
         try:
@@ -377,6 +372,13 @@ class AISettingsDialog(QDialog):
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+
+            # 保存 API Key 到加密保险库（Vault）
+            from core.security.vault import vault
+            if api_key:
+                vault.store_api_key(self._current_provider_name, api_key)
+            else:
+                vault.delete_api_key(self._current_provider_name)
 
             # 设为当前提供商
             if self._set_active_check.isChecked():

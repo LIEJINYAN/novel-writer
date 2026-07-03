@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt
 
 # 将项目根目录加入 Python 路径
 project_root = Path(__file__).parent.parent
@@ -13,6 +13,7 @@ from models import db_manager
 from ui.main_window import MainWindow
 from ui.styles.style_manager import style_manager
 from utils.logger import logger
+from core.plugins.manager import plugin_manager
 
 
 def init_app() -> bool:
@@ -44,14 +45,19 @@ def main():
         logger.error("初始化失败，应用退出")
         sys.exit(1)
 
-    # 读取保存的主题，默认暗色（优先 DB，回退 QSettings）
+    # 初始化插件系统
+    try:
+        discovered = plugin_manager.discover_plugins()
+        logger.info(f"插件系统初始化完成，发现 {discovered} 个插件")
+    except Exception as e:
+        logger.warning(f"插件系统初始化失败（非致命）: {e}")
+
+    # 读取保存的主题，默认暗色（从 app_config 表读取）
     try:
         from services.app_config_service import app_config_service
-        db_theme = app_config_service.get("theme")
-        saved_theme = db_theme if db_theme else \
-            QSettings("NovelWriter", "NovelWriter").value("theme", "dark")
+        saved_theme = app_config_service.get("theme", "dark")
     except Exception:
-        saved_theme = QSettings("NovelWriter", "NovelWriter").value("theme", "dark")
+        saved_theme = "dark"
     style_manager.apply_theme(app, saved_theme)
 
     # 创建并显示主窗口

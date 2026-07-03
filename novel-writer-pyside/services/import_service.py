@@ -222,7 +222,6 @@ class ImportService:
                     continue
                 # 查找对应章节
                 ch = session.query(Chapter).filter(
-                    Chapter.project_id == project.id,
                     Chapter.chapter_number == chapter_num,
                 ).first()
                 if not ch:
@@ -231,7 +230,6 @@ class ImportService:
                     if not isinstance(app, dict):
                         continue
                     app_char = session.query(Character).filter(
-                        Character.project_id == project.id,
                         Character.name == app.get("character", ""),
                     ).first()
                     if app_char:

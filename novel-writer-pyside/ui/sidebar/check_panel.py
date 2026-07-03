@@ -220,7 +220,7 @@ class CheckPanel(QWidget):
             display = self._ai_buffer
             if len(display) > 100:
                 display = display[-100:]
-            self._ai_placeholder.setText(display)
+            self._ai_placeholder.setText(0, display)
 
     def _on_ai_done(self):
         """AI 检查完成。"""
@@ -244,7 +244,7 @@ class CheckPanel(QWidget):
         self._ai_btn.setText("AI 深度检查")
         self._status_label.setText(f"AI 检查失败: {msg}")
         if self._ai_placeholder:
-            self._ai_placeholder.setText(f"错误: {msg}")
+            self._ai_placeholder.setText(0, f"错误: {msg}")
             self._ai_placeholder.setForeground(0, QColor("#E74C3C"))
             self._ai_placeholder = None
 

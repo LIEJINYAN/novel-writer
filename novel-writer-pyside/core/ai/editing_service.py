@@ -2,7 +2,7 @@
 from typing import Optional
 from core.ai.ai_worker import AIWorker
 from core.ai.manager import ai_manager
-from core.ai.prompts.registry import get_template
+from core.ai.prompt_templates.registry import get_template
 from core.ai.base import Message, AIProviderError
 
 
@@ -33,7 +33,7 @@ class EditingAIService:
         if template is None:
             raise AIProviderError("找不到润色模板")
 
-        messages_data = template.render({"text": text, "style": style})
+        messages_data = template.build_messages(text=text, style=style)
         messages = [Message(**m) for m in messages_data]
         config = ai_manager._create_config_from_active()
         config.stream = True
@@ -62,7 +62,7 @@ class EditingAIService:
         if template is None:
             raise AIProviderError("找不到重写模板")
 
-        messages_data = template.render({"text": text, "direction": direction})
+        messages_data = template.build_messages(text=text, direction=direction)
         messages = [Message(**m) for m in messages_data]
         config = ai_manager._create_config_from_active()
         config.stream = True

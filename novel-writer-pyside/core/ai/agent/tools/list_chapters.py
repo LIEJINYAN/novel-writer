@@ -20,11 +20,11 @@ def list_chapters_handler(project_id: int, **kwargs) -> dict:
     """列出章节。"""
     try:
         from models import db_manager, Chapter
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
-            chapters = session.query(Chapter).filter_by(project_id=project_id).order_by(Chapter.order).all()
+            chapters = session.query(Chapter).order_by(Chapter.chapter_number).all()
             data = [
-                {"id": ch.id, "title": ch.title or "", "word_count": ch.word_count or 0, "order": ch.order or 0}
+                {"id": ch.id, "title": ch.title or "", "word_count": ch.word_count or 0, "order": ch.chapter_number or 0}
                 for ch in chapters
             ]
             return {"success": True, "message": f"共 {len(data)} 章", "data": data}

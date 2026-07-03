@@ -243,7 +243,7 @@ class CharacterDialog(QDialog):
             "personality": self.personality_edit.toPlainText().strip(),
             "appearance": self.appearance_edit.toPlainText().strip(),
             "background": self.background_edit.toPlainText().strip(),
-            "arc": self.arc_edit.toPlainText().strip(),
+            "character_arc": self.arc_edit.toPlainText().strip(),
         }
 
         if self._character_id:

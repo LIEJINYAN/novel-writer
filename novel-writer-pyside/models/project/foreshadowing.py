@@ -1,6 +1,6 @@
 """伏笔数据模型。"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Index
 from models.database import ProjectBase
 
 
@@ -18,5 +18,10 @@ class Foreshadowing(ProjectBase):
     hints = Column(Text)
     related_characters = Column(Text)
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_foreshadowings_status", "status"),
+        Index("idx_foreshadowings_importance", "importance"),
+    )

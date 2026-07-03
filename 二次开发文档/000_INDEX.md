@@ -69,36 +69,49 @@
 
 ```
 novel-writer-pyside/
-├── app/                    # 应用入口
-│   ├── main.py             # 主入口
-│   └── config.py           # 配置管理
-├── ui/                     # UI 层
-│   ├── main_window.py      # 主窗口
-│   ├── editor/             # 编辑器组件
-│   ├── sidebar/            # 侧边栏
-│   ├── dialogs/            # 对话框
-│   └── styles/             # QSS 样式
-├── core/                   # 核心业务逻辑
-│   ├── project/            # 项目管理
-│   ├── writing/            # 写作引擎
-│   ├── ai/                 # AI 接口层
-│   ├── methods/            # 写作方法论
-│   ├── tracking/           # 追踪系统
-│   └── plugins/            # 插件系统
-├── models/                 # 数据模型
-│   ├── database.py         # 数据库连接
-│   ├── project.py          # 项目模型
-│   ├── chapter.py          # 章节模型
+├── app/                     # 应用入口
+│   ├── main.py              # 主入口
+│   └── config.py            # 配置管理
+├── ui/                      # UI 层
+│   ├── main_window.py       # 主窗口
+│   ├── editor/              # 编辑器组件（editor_widget, editor_container, search_panel)
+│   ├── sidebar/             # 侧边栏面板（角色、情节、时间线、大纲等）
+│   ├── dialogs/             # 对话框（设置、角色编辑、情节编辑等）
+│   └── styles/              # QSS 样式主题（dark/light）
+├── core/                    # 核心业务逻辑
+│   ├── project/             # 项目管理
+│   ├── writing/             # 写作引擎
+│   ├── ai/                  # AI 接口层（7 个提供商、提示词、写作引擎）
+│   │   ├── providers/       # AI 提供商适配器
+│   │   ├── prompts/         # 提示词模板
+│   │   ├── writing_methods/ # 写作方法论 AI 集成
+│   │   ├── agent/           # Agent 系统（工具注册、执行器）
+│   │   └── context/         # 上下文构建与管理
+│   ├── methods/             # 写作方法论注册
+│   ├── tracking/            # 追踪系统
+│   ├── plugins/             # 插件系统
+│   ├── di/                  # 依赖注入容器
+│   └── repositories/        # 仓储模式实现
+├── models/                  # 数据模型（双库架构）
+│   ├── database.py          # 数据库连接与会话管理
+│   ├── app/                 # 应用级模型（projects, ai_providers 等 5 表）
+│   └── project/             # 项目级模型（volumes, chapters 等 17 表）
+├── services/                # 服务层（CRUD 业务逻辑）
+│   ├── chapter_service.py
+│   ├── character_service.py
+│   ├── plot_service.py
+│   ├── relationship_service.py
 │   └── ...
-├── services/               # 服务层
-│   ├── project_service.py
-│   ├── ai_service.py
-│   └── ...
-├── utils/                  # 工具函数
-├── plugins/                # 插件目录
-├── resources/              # 资源文件
-├── tests/                  # 测试
-└── requirements.txt        # 依赖清单
+├── utils/                   # 工具函数
+│   ├── crypto.py            # API Key 加密/解密
+│   ├── logger.py            # 日志
+│   └── signal_bus.py        # 全局信号总线
+├── resources/               # 资源文件
+│   └── fonts/               # 图标字体（codicon.ttf）
+├── alembic/                 # 数据库迁移管线
+├── scripts/                 # 迁移脚本
+├── tests/                   # 测试
+└── requirements.txt         # 依赖清单
 ```
 
 ---

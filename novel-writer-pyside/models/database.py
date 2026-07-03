@@ -55,6 +55,8 @@ class DatabaseManager:
             conn.execute(text("PRAGMA journal_mode=WAL"))
             conn.execute(text("PRAGMA busy_timeout=5000"))
             conn.execute(text("PRAGMA foreign_keys=ON"))
+            conn.execute(text("PRAGMA cache_size=-20000"))
+            conn.execute(text("PRAGMA temp_store=MEMORY"))
 
         self._app_session_factory = sessionmaker(bind=self._app_engine)
         AppBase.metadata.create_all(self._app_engine)
@@ -92,6 +94,8 @@ class DatabaseManager:
             conn.execute(text("PRAGMA journal_mode=WAL"))
             conn.execute(text("PRAGMA busy_timeout=5000"))
             conn.execute(text("PRAGMA foreign_keys=ON"))
+            conn.execute(text("PRAGMA cache_size=-20000"))
+            conn.execute(text("PRAGMA temp_store=MEMORY"))
 
         self._project_session_factory = sessionmaker(bind=self._project_engine)
         ProjectBase.metadata.create_all(self._project_engine)
@@ -273,6 +277,15 @@ class DatabaseManager:
                         except Exception:
                             pass
                 conn.commit()
+            # 补上 temperature / max_tokens（新模型新增字段）
+            for col_name, col_def in [("temperature", "FLOAT DEFAULT 0.8"),
+                                       ("max_tokens", "INTEGER DEFAULT 4096")]:
+                if col_name not in cols:
+                    try:
+                        conn.execute(f"ALTER TABLE ai_providers ADD COLUMN {col_name} {col_def}")
+                    except Exception:
+                        pass
+            conn.commit()
             conn.close()
         except Exception as e:
             import logging

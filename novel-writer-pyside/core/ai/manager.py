@@ -95,7 +95,7 @@ class AIManager:
         session = db_manager.get_session()
         try:
             # 查找已有记录
-            provider = session.query(AIProvider).filter_by(name=name).first()
+            provider = session.query(AIProvider).filter_by(provider_name=name).first()
             
             # 加密 API Key
             if api_key:
@@ -124,7 +124,7 @@ class AIManager:
             else:
                 # 新建
                 provider = AIProvider(
-                    name=name,
+                    provider_name=name,
                     display_name=self._providers[name].display_name if name in self._providers else name,
                     api_key_encrypted=encrypted_key,
                     api_base=api_base,
@@ -178,7 +178,7 @@ class AIManager:
                     except Exception:
                         api_key = ""
                 
-                self._configs[p.name] = {
+                self._configs[p.provider_name] = {
                     "api_key": api_key,
                     "api_base": p.api_base or "",
                     "model": p.default_model or "",
@@ -223,11 +223,23 @@ class AIManager:
     def _create_config_from_active(self) -> AIConfig:
         """从激活提供商的缓存配置创建 AIConfig。"""
         config_dict = self._configs.get(self._active_provider_name, {})
+        
+        # 尝试从 Vault 获取加密的 API Key
+        api_key = config_dict.get("api_key", "")
+        provider_name = self._active_provider_name
+        if provider_name:
+            try:
+                from core.security.vault import vault as credential_vault
+                if credential_vault.has_api_key(provider_name):
+                    api_key = credential_vault.get_api_key(provider_name)
+            except Exception:
+                pass  # Vault 不可用时优雅退化到明文
+        
         return AIConfig(
             model=config_dict.get("model", ""),
             temperature=config_dict.get("temperature", 0.8),
             max_tokens=config_dict.get("max_tokens", 4096),
-            api_key=config_dict.get("api_key", ""),
+            api_key=api_key,
             api_base=config_dict.get("api_base", ""),
             stream=True,
         )

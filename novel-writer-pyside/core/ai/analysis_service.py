@@ -2,7 +2,7 @@
 from typing import Optional
 from core.ai.ai_worker import AIWorker
 from core.ai.manager import ai_manager
-from core.ai.prompts.registry import get_template
+from core.ai.prompt_templates.registry import get_template
 from core.ai.base import Message
 
 
@@ -23,7 +23,7 @@ class AnalysisService:
             AIWorker 实例
         """
         template = get_template("analyze")
-        message_dicts = template.render({"content": content, "genre": genre})
+        message_dicts = template.build_messages(content=content, genre=genre)
         messages = [Message(**m) for m in message_dicts]
         config = ai_manager._create_config_from_active()
         config.stream = True

@@ -1,6 +1,6 @@
 """章节数据模型。"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Index
 from sqlalchemy.orm import relationship as rel, backref
 from models.database import ProjectBase
 
@@ -22,10 +22,10 @@ class Chapter(ProjectBase):
     status = Column(String(20), default="draft")
     plot_stage = Column(String(50))
     sort_order = Column(Integer, default=0)
-    is_deleted = Column(Integer, default=0)
+    is_deleted = Column(Boolean, default=False)
     completed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
 
     volume = rel("Volume", backref=backref("chapters", passive_deletes=True))
 

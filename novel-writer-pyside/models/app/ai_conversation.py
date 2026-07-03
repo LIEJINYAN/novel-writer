@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Index
 
 from models.database import AppBase
 
@@ -16,5 +16,10 @@ class AIConversation(AppBase):
     model = Column(String(100))
     messages = Column(Text, nullable=False)
     total_tokens = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_ai_conversations_project_id", "project_id"),
+        Index("idx_ai_conversations_updated_at", "updated_at"),
+    )

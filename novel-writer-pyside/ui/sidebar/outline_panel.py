@@ -8,8 +8,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QCursor
 
-from core.ai.writing_methods.advisor import method_advisor
-from core.ai.writing_methods.base import WritingMethod
+from core.methods.advisor import method_advisor
+from core.methods.base import WritingMethod
 
 from core.methods.registry import get_method, list_methods, PlotNode
 
@@ -383,7 +383,7 @@ class OutlinePanel(QWidget):
     def _on_convert_method(self):
         """弹出转换对话框。"""
         from PySide6.QtWidgets import QMessageBox, QComboBox, QVBoxLayout, QLabel, QDialog, QDialogButtonBox
-        from core.ai.writing_methods.method_converter import method_converter
+        from core.methods.converter import method_converter
 
         # 获取当前方法和章节
         current = self._method_combo.currentText()
