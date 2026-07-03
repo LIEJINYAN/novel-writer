@@ -71,6 +71,7 @@ def migrate_project(conn: sqlite3.Connection, project_id: int,
     from sqlalchemy import create_engine
     engine = create_engine(f"sqlite:///{project_db_path}")
     ProjectBase.metadata.create_all(engine)
+    engine.dispose()
 
     # 逐表迁移（移除 project_id 列）
     for table in PROJECT_TABLES:

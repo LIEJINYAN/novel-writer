@@ -259,6 +259,20 @@ class DatabaseManager:
                 conn.execute("DROP TABLE ai_providers_old")
                 conn.execute("PRAGMA foreign_keys=ON")
                 conn.commit()
+            # 检查并加密明文 api_key 值（加密值以 gAAAAA 开头）
+            has_api_key_col = "api_key" in cols
+            if has_api_key_col:
+                rows = conn.execute("SELECT id, api_key FROM ai_providers WHERE api_key IS NOT NULL AND api_key != ''").fetchall()
+                for row_id, api_key_val in rows:
+                    if not api_key_val.startswith("gAAAAA"):
+                        try:
+                            from utils.crypto import encrypt_api_key
+                            encrypted = encrypt_api_key(api_key_val)
+                            conn.execute("UPDATE ai_providers SET api_key = ? WHERE id = ?",
+                                         (encrypted, row_id))
+                        except Exception:
+                            pass
+                conn.commit()
             conn.close()
         except Exception as e:
             import logging

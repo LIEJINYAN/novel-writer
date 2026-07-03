@@ -162,17 +162,22 @@ class AgentExecutor:
 
             # 解析参数
             params = {}
-            # 匹配 key="value" 或 key=number
-            param_pattern = r'(\w+)\s*=\s*"([^"]*)"|(\w+)\s*=\s*(\d+)'
+            # 匹配 key="value" | key=123 | key=3.14 | key=true | key=value
+            param_pattern = r'(\w+)\s*=\s*"([^"]*)"|(\w+)\s*=\s*(\d+\.?\d*)|(\w+)\s*=\s*(true|false)|(\w+)\s*=\s*(\w+)'
             for pm in re.finditer(param_pattern, params_str):
-                key = pm.group(1) or pm.group(3)
-                val = pm.group(2) or int(pm.group(4))
+                if pm.group(1) and pm.group(2):
+                    key, val = pm.group(1), pm.group(2)
+                elif pm.group(3) and pm.group(4):
+                    key = pm.group(3)
+                    raw = pm.group(4)
+                    val = float(raw) if "." in raw else int(raw)
+                elif pm.group(5) and pm.group(6):
+                    key = pm.group(5)
+                    val = pm.group(6).lower() == "true"
+                else:
+                    key, val = pm.group(7), pm.group(8)
                 params[key] = val
 
             results.append((tool_name, params))
 
         return results
-
-
-# 全局实例
-agent_executor = AgentExecutor.__new__(AgentExecutor)

@@ -11,7 +11,7 @@ class AIProvider(AppBase):
     id = Column(Integer, primary_key=True)
     provider_name = Column(String(50), unique=True, nullable=False)
     display_name = Column(String(100), nullable=False)
-    api_key = Column(Text, nullable=True)
+    api_key_encrypted = Column("api_key", Text, nullable=True)
     api_base = Column(String(500), nullable=True)
     default_model = Column(String(100), nullable=True)
     is_enabled = Column(Integer, default=1)
