@@ -150,7 +150,7 @@
 - **Then**: 编辑器、标签页、状态栏等所有新组件都正确切换样式
 - **Verification**: `human-judgment`
 
-## Open Questions
-- [ ] 编辑器是否需要行号显示？（建议：第一批不加，后续加）
-- [ ] 是否需要撤销/重做历史记录？（QPlainTextEdit 自带，默认启用）
-- [ ] 自动保存间隔是否需要让用户配置？（建议：先固定 30 秒，后续加设置面板）
+## ~~Open Questions~~ ✅ 全部已决策
+- [x] **行号显示** → EditorWidget 已实现 LineNumberArea，两个主题 QSS 适配
+- [x] **撤销/重做** → QPlainTextEdit 自带，已补工具栏按钮 + undoAvailable/redoAvailable 状态绑定
+- [x] **自动保存间隔** → 默认 30 秒，AI 设置对话框中提供 QSpinBox（范围 10-300 秒）

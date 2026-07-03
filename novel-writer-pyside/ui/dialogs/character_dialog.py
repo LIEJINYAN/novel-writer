@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
 from services.character_service import character_service
-from models.character import Character
+from models import Character
 
 
 class CharacterDialog(QDialog):

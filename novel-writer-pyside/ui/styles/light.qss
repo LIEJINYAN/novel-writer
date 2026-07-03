@@ -270,41 +270,125 @@ QWidget#stats_panel QProgressBar::chunk {
     border-radius: 4px;
 }
 
-/* ========== 搜索面板 search_panel ========== */
+/* ========== 搜索面板 search_panel（VSCode 风格浮动面板） ========== */
 QWidget#search_panel {
-    background-color: #f6f8fa;
-    border-top: 1px solid #e1e4e8;
-    padding: 8px;
-}
-QWidget#search_panel QLineEdit {
     background-color: #ffffff;
-    color: #24292e;
-    border: 1px solid #e1e4e8;
+    border: 1px solid #b0b8c1;
     border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 13px;
 }
-QWidget#search_panel QLineEdit:focus {
-    border-color: #0969da;
+
+/* 搜索框容器（输入框 + 匹配计数 + Aa/.* 内嵌） */
+QFrame#search_input_container {
+    background-color: #f6f8fa;
+    border: 1px solid #b0b8c1;
+    border-radius: 4px;
+    min-height: 24px;
+    max-height: 24px;
 }
-QWidget#search_panel QPushButton {
-    background-color: #e1e4e8;
+QFrame#search_input_container[focused="true"] {
+    border: 1px solid #0969da;
+}
+QLineEdit#search_input_inner {
+    background: transparent;
     color: #24292e;
     border: none;
-    border-radius: 4px;
-    padding: 4px 10px;
-    min-width: auto;
+    padding: 2px 0;
     font-size: 12px;
+    selection-background-color: #ddf4ff;
 }
-QWidget#search_panel QPushButton:hover {
-    background-color: #d1d5da;
-}
-QWidget#search_panel QPushButton:pressed {
-    background-color: #c0c4c9;
-}
-QWidget#search_panel QLabel#match_count {
-    color: #586069;
+QLabel#match_label_inline {
+    color: #6a737d;
     font-size: 11px;
+    padding: 0 2px;
+}
+
+/* 所有按钮统一样式（20×20） */
+QWidget#search_panel QPushButton#nav_btn,
+QWidget#search_panel QPushButton#option_btn,
+QWidget#search_panel QPushButton#toggle_replace_btn {
+    background-color: transparent;
+    color: #57606a;
+    border: none;
+    border-top-left-radius: 3px;
+    border-bottom-left-radius: 3px;
+    font-size: 12px;
+    min-width: 18px;
+    max-width: 18px;
+    padding: 0;
+}
+QWidget#search_panel QPushButton#close_btn {
+    background-color: transparent;
+    color: #57606a;
+    border: none;
+    border-radius: 3px;
+    font-size: 12px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+    padding: 0;
+}
+QWidget#search_panel QPushButton#nav_btn:hover,
+QWidget#search_panel QPushButton#close_btn:hover,
+QWidget#search_panel QPushButton#option_btn:hover,
+QWidget#search_panel QPushButton#toggle_replace_btn:hover {
+    background-color: #e1e4e8;
+    color: #24292e;
+}
+QWidget#search_panel QPushButton#option_btn:checked,
+QWidget#search_panel QPushButton#toggle_replace_btn:checked {
+    background-color: #d0d7de;
+    color: #0969da;
+}
+
+/* 替换按钮（Codicon 图标按钮，与导航按钮风格统一） */
+QWidget#search_panel QPushButton#replace_btn {
+    background-color: transparent;
+    color: #57606a;
+    border: none;
+    border-radius: 3px;
+    font-size: 12px;
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 20px;
+    max-height: 22px;
+    padding: 0;
+}
+QWidget#search_panel QPushButton#replace_btn:hover {
+    background-color: #e1e4e8;
+    color: #24292e;
+}
+
+/* 替换输入框 */
+QLineEdit#replace_input_inner {
+    background: transparent;
+    color: #24292e;
+    border: none;
+    padding: 2px 0;
+    font-size: 12px;
+    selection-background-color: #ddf4ff;
+}
+
+/* ========== 搜索结果列表 ========== */
+QListWidget#search_results {
+    background-color: #f6f8fa;
+    border: none;
+    border-top: 1px solid #e1e4e8;
+    outline: none;
+    font-size: 13px;
+    color: #586069;
+}
+QListWidget#search_results::item {
+    padding: 4px 12px;
+    border-bottom: 1px solid #e1e4e8;
+}
+QListWidget#search_results::item:hover {
+    background-color: #f0f2f5;
+    color: #24292e;
+}
+QListWidget#search_results::item:selected {
+    background-color: #e1e4e8;
+    color: #0969da;
 }
 
 /* ========== QProgressBar 进度条 ========== */
@@ -711,3 +795,163 @@ QWidget#plot_panel QTreeWidget#plot_tree::item:selected {
     background-color: #e1e4e8;
     color: #0366d6;
 }
+
+/* ========== 关系面板 ========== */
+QWidget#relationship_panel {
+    background-color: #ffffff;
+}
+
+QWidget#relationship_panel QTableWidget {
+    background-color: #ffffff;
+    border: 1px solid #d1d5da;
+    border-radius: 4px;
+    gridline-color: #e1e4e8;
+    color: #24292e;
+}
+
+QWidget#relationship_panel QTableWidget::item:selected {
+    background-color: #0366d6;
+    color: #ffffff;
+}
+
+QWidget#relationship_panel QPushButton {
+    background-color: #f6f8fa;
+    color: #24292e;
+    border: 1px solid #d1d5da;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+QWidget#relationship_panel QPushButton:hover {
+    background-color: #e1e4e8;
+}
+
+/* ========== 时间线面板 ========== */
+QWidget#timeline_panel {
+    background-color: #ffffff;
+}
+
+QWidget#timeline_panel QListWidget {
+    background-color: #ffffff;
+    border: 1px solid #d1d5da;
+    border-radius: 4px;
+    color: #24292e;
+}
+
+QWidget#timeline_panel QListWidget::item {
+    padding: 8px;
+    border-radius: 4px;
+}
+
+QWidget#timeline_panel QListWidget::item:hover {
+    background-color: #f6f8fa;
+}
+
+QWidget#timeline_panel QListWidget::item:selected {
+    background-color: #e1e4e8;
+}
+
+QWidget#timeline_panel QPushButton {
+    background-color: #f6f8fa;
+    color: #24292e;
+    border: 1px solid #d1d5da;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+QWidget#timeline_panel QPushButton:hover {
+    background-color: #e1e4e8;
+}
+
+/* 重要性颜色标记 */
+.importance-core { color: #E74C3C; }
+.importance-major { color: #0366d6; }
+.importance-minor { color: #959da5; }
+
+/* ========== 世界观面板 ========== */
+QWidget#world_panel {
+    background-color: #ffffff;
+}
+
+QWidget#world_panel QTreeWidget {
+    background-color: #ffffff;
+    border: 1px solid #d1d5da;
+    border-radius: 4px;
+    color: #24292e;
+}
+
+QWidget#world_panel QTreeWidget::item {
+    padding: 6px 8px;
+    border-radius: 4px;
+}
+
+QWidget#world_panel QTreeWidget::item:hover {
+    background-color: #f6f8fa;
+}
+
+QWidget#world_panel QTreeWidget::item:selected {
+    background-color: #e1e4e8;
+    color: #0366d6;
+}
+
+QWidget#world_panel QPushButton {
+    background-color: #f6f8fa;
+    color: #24292e;
+    border: 1px solid #d1d5da;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+QWidget#world_panel QPushButton:hover {
+    background-color: #e1e4e8;
+}
+
+/* ========== 检查面板 ========== */
+QWidget#check_panel {
+    background-color: #ffffff;
+}
+
+QWidget#check_panel QTreeWidget {
+    background-color: #ffffff;
+    border: 1px solid #d1d5da;
+    border-radius: 4px;
+    color: #24292e;
+}
+
+QWidget#check_panel QTreeWidget::item {
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+QWidget#check_panel QTreeWidget::item:hover {
+    background-color: #f6f8fa;
+}
+
+QWidget#check_panel QTreeWidget::item:selected {
+    background-color: #e1e4e8;
+}
+
+QWidget#check_panel QPushButton {
+    background-color: #f6f8fa;
+    color: #24292e;
+    border: 1px solid #d1d5da;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+QWidget#check_panel QPushButton:hover {
+    background-color: #e1e4e8;
+}
+
+QWidget#check_panel QPushButton:disabled {
+    background-color: #f6f8fa;
+    color: #959da5;
+}
+
+.check-error { color: #E74C3C; }
+.check-warning { color: #F39C12; }
+.check-info { color: #959da5; }

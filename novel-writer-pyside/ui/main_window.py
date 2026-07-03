@@ -11,19 +11,23 @@ from PySide6.QtWidgets import (
     QFileDialog, QListWidget, QDialog, QPushButton,
     QInputDialog, QAbstractItemView, QFrame, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer, QSettings, QAbstractItemModel
-from PySide6.QtGui import QAction, QKeySequence, QShortcut, QTextCursor, QTextCharFormat, QColor, QBrush
+from PySide6.QtCore import Qt, QTimer, QSettings, QAbstractItemModel, QRegularExpression
+from PySide6.QtGui import QAction, QKeySequence, QShortcut, QTextCursor, QTextCharFormat, QColor, QBrush, QTextDocument
 
 from ui.styles.style_manager import style_manager
 from ui.dialogs.new_project_dialog import NewProjectDialog
 from ui.dialogs.ai_settings_dialog import AISettingsDialog
 from ui.components.editor_widget import EditorWidget
-from ui.components.search_panel import SearchPanel
+from ui.components.editor_container import EditorContainer
 from ui.sidebar.outline_panel import OutlinePanel
 from ui.sidebar.stats_panel import StatsPanel
 from ui.sidebar.ai_panel import AIPanel
 from ui.sidebar.character_panel import CharacterPanel
 from ui.sidebar.plot_panel import PlotPanel
+from ui.sidebar.relationship_panel import RelationshipPanel
+from ui.sidebar.timeline_panel import TimelinePanel
+from ui.sidebar.world_panel import WorldPanel
+from ui.sidebar.check_panel import CheckPanel
 from core.ai.editing_service import editing_service
 from core.ai.analysis_service import analysis_service
 from ui.dialogs.ai_polish_diff_dialog import AIPolishDiffDialog
@@ -31,10 +35,18 @@ from utils.signal_bus import signal_bus
 from utils.logger import logger
 from services.project_service import ProjectService
 from services.chapter_service import ChapterService
+from services.project_info_service import project_info_service
 from core.ai.manager import ai_manager
 from core.ai.writing_service import writing_service
 from core.ai.base import AIProviderError
 from models import db_manager, Project, Volume, Chapter
+from services.export_service import ExportService
+from services.import_service import ImportService
+from services.txt_import_service import TxtImportService
+from services.epub_import_service import EpubImportService
+from services.pdf_import_service import PdfImportService
+from ui.dialogs.import_preview_dialog import ImportPreviewDialog
+from ui.dialogs.trash_dialog import TrashDialog
 
 
 class ProjectTreeWidget(QTreeWidget):
@@ -99,6 +111,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._project_service = ProjectService()
         self._chapter_service = ChapterService()
+        self._export_service = ExportService()
+        self._txt_import_service = TxtImportService()
         self._current_project_id = None
         self._current_chapter_id = None
         self._open_chapters = {}
@@ -169,6 +183,29 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        # 导入子菜单
+        import_menu = file_menu.addMenu("导入(&I)")
+
+        import_original_action = QAction("从原版导入...", self)
+        import_original_action.triggered.connect(self._on_import_original)
+        import_menu.addAction(import_original_action)
+
+        import_menu.addSeparator()
+
+        txt_import_action = QAction("从 TXT/MD 导入...", self)
+        txt_import_action.triggered.connect(self._on_import_txt)
+        import_menu.addAction(txt_import_action)
+
+        epub_import_action = QAction("从 EPUB 导入...", self)
+        epub_import_action.triggered.connect(self._on_import_epub)
+        import_menu.addAction(epub_import_action)
+
+        pdf_import_action = QAction("从 PDF 导入...", self)
+        pdf_import_action.triggered.connect(self._on_import_pdf)
+        import_menu.addAction(pdf_import_action)
+
+        file_menu.addSeparator()
+
         exit_action = QAction("退出(&Q)", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
@@ -209,15 +246,54 @@ class MainWindow(QMainWindow):
         # ========== 工具菜单 ==========
         tool_menu = menubar.addMenu("工具(&T)")
 
+        settings_action = QAction("应用设置...", self)
+        settings_action.triggered.connect(self._on_app_settings)
+        tool_menu.addAction(settings_action)
+
+        tool_menu.addSeparator()
+
         ai_settings_action = QAction("AI 设置...", self)
         ai_settings_action.triggered.connect(self._on_ai_settings)
         tool_menu.addAction(ai_settings_action)
+
+        tool_menu.addSeparator()
+
+        trash_action = QAction("回收站...", self)
+        trash_action.triggered.connect(self._on_open_trash)
+        tool_menu.addAction(trash_action)
 
         # ========== 帮助菜单 ==========
         help_menu = menubar.addMenu("帮助(&H)")
         about_action = QAction("关于(&A)", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+        # ========== 导出菜单 ==========
+        export_menu = menubar.addMenu("导出(&X)")
+
+        export_txt_action = QAction("全本导出 TXT", self)
+        export_txt_action.triggered.connect(self._on_export_txt)
+        export_menu.addAction(export_txt_action)
+
+        export_md_action = QAction("全本导出 Markdown", self)
+        export_md_action.triggered.connect(self._on_export_md)
+        export_menu.addAction(export_md_action)
+
+        export_menu.addSeparator()
+
+        export_epub_action = QAction("全本导出 EPUB...", self)
+        export_epub_action.triggered.connect(self._on_export_epub)
+        export_menu.addAction(export_epub_action)
+
+        export_pdf_action = QAction("全本导出 PDF...", self)
+        export_pdf_action.triggered.connect(self._on_export_pdf)
+        export_menu.addAction(export_pdf_action)
+
+        export_menu.addSeparator()
+
+        export_original_action = QAction("导出为原版格式...", self)
+        export_original_action.triggered.connect(self._on_export_original)
+        export_menu.addAction(export_original_action)
 
     def _init_toolbar(self):
         toolbar = QToolBar("主工具栏", self)
@@ -230,6 +306,18 @@ class MainWindow(QMainWindow):
         open_btn = toolbar.addAction("打开")
         open_btn.triggered.connect(self._on_open_project)
 
+        toolbar.addSeparator()
+
+        self._undo_act = toolbar.addAction("撤销")
+        self._undo_act.setShortcut(QKeySequence.Undo)
+        self._undo_act.setEnabled(False)
+        self._undo_act.triggered.connect(lambda: self._get_current_editor() and self._get_current_editor().undo())
+
+        self._redo_act = toolbar.addAction("重做")
+        self._redo_act.setShortcut(QKeySequence.Redo)
+        self._redo_act.setEnabled(False)
+        self._redo_act.triggered.connect(lambda: self._get_current_editor() and self._get_current_editor().redo())
+
     def _init_central_widget(self):
         central_container = QWidget()
         central_container.setObjectName("central_container")
@@ -237,15 +325,14 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._search_panel = SearchPanel()
-        self._search_panel.setVisible(False)
-        layout.addWidget(self._search_panel, 0)
-
         self._editor_tabs = QTabWidget()
         self._editor_tabs.setObjectName("editor_tabs")
         self._editor_tabs.setTabsClosable(True)
         self._editor_tabs.tabCloseRequested.connect(self._close_editor_tab)
         self._editor_tabs.setMovable(True)
+        # 标签页右键菜单（批量关闭）
+        self._editor_tabs.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
+        self._editor_tabs.tabBar().customContextMenuRequested.connect(self._on_tab_bar_context_menu)
         layout.addWidget(self._editor_tabs, 1)
 
         self.setCentralWidget(central_container)
@@ -276,7 +363,7 @@ class MainWindow(QMainWindow):
         self._project_tree.setAcceptDrops(True)
         self._project_tree.setDropIndicatorShown(True)
         self._project_tree.setDragDropMode(QTreeWidget.InternalMove)
-        self._project_tree.setSelectionMode(QTreeWidget.SingleSelection)
+        self._project_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
         self._project_tree.model().rowsMoved.connect(self._on_tree_rows_moved)
         self._project_dock.setWidget(self._project_tree)
         self._project_dock.setMinimumWidth(200)
@@ -306,6 +393,23 @@ class MainWindow(QMainWindow):
         self._plot_panel = PlotPanel()
         self._sidebar_tabs.addTab(self._plot_panel, "情节")
 
+        # 关系面板
+        self._relationship_panel = RelationshipPanel()
+        self._sidebar_tabs.addTab(self._relationship_panel, "关系")
+
+        # 时间线面板
+        self._timeline_panel = TimelinePanel()
+        self._sidebar_tabs.addTab(self._timeline_panel, "时间线")
+
+        # 世界观面板
+        self._world_panel = WorldPanel()
+        self._sidebar_tabs.addTab(self._world_panel, "世界观")
+
+        # 检查面板
+        self._check_panel = CheckPanel()
+        self._check_panel.navigate_to_chapter.connect(self._open_chapter_editor)
+        self._sidebar_tabs.addTab(self._check_panel, "检查")
+
         self._sidebar_dock.setWidget(self._sidebar_tabs)
         self._sidebar_dock.setMinimumWidth(250)
         self.addDockWidget(Qt.RightDockWidgetArea, self._sidebar_dock)
@@ -329,12 +433,6 @@ class MainWindow(QMainWindow):
 
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._toggle_search_panel)
-        self._search_panel.search_text_changed.connect(self._on_search_text_changed)
-        self._search_panel.search_next.connect(self._on_search_next)
-        self._search_panel.search_prev.connect(self._on_search_prev)
-        self._search_panel.replace.connect(self._on_replace)
-        self._search_panel.replace_all.connect(self._on_replace_all)
-        self._search_panel.close_panel.connect(self._on_close_search_panel)
 
         # AI 面板信号
         if self._ai_panel is not None:
@@ -374,6 +472,13 @@ class MainWindow(QMainWindow):
         if self._ai_panel is not None:
             self._ai_panel.update_providers()
 
+    def _on_open_trash(self):
+        """打开回收站对话框。"""
+        dialog = TrashDialog(self)
+        dialog.exec()
+        # 关闭回收站后刷新项目树（可能有恢复/删除操作）
+        self._reload_project_tree()
+
     def _on_ai_provider_changed(self, provider_name: str):
         """AI 面板切换提供商。"""
         from core.ai.manager import ai_manager
@@ -394,6 +499,12 @@ class MainWindow(QMainWindow):
             info = dialog.get_project_info()
             try:
                 project = self._project_service.create_project(info)
+                db_manager.open_project(project.path)
+                project_info_service.create(
+                    name=project.name,
+                    genre=project.genre,
+                    writing_method=project.writing_method,
+                )
                 self._current_project_id = project.id
                 signal_bus.project_created.emit(project.id)
                 signal_bus.status_message.emit(f"项目'{project.name}'创建成功")
@@ -453,7 +564,12 @@ class MainWindow(QMainWindow):
         self._stats_panel.clear()
         self._character_panel.clear()
         self._plot_panel.clear()
+        self._relationship_panel.clear()
+        self._timeline_panel.clear()
+        self._world_panel.clear()
+        self._check_panel.clear()
         self._show_welcome_page()
+        db_manager.close_project()
         signal_bus.project_closed.emit()
         signal_bus.status_message.emit("项目已关闭")
 
@@ -513,6 +629,18 @@ class MainWindow(QMainWindow):
         if not item:
             return
 
+        # 检查是否选中了多个章节（批量操作）
+        selected_items = self._project_tree.selectedItems()
+        selected_chapters = [
+            si for si in selected_items
+            if isinstance(si.data(0, Qt.UserRole), tuple)
+            and si.data(0, Qt.UserRole)[0] == "chapter"
+        ]
+
+        if len(selected_chapters) > 1:
+            self._show_batch_chapter_menu(pos, selected_chapters)
+            return
+
         menu = QMenu(self)
         data = item.data(0, Qt.UserRole)
 
@@ -520,6 +648,9 @@ class MainWindow(QMainWindow):
         if isinstance(data, int):
             open_folder_action = menu.addAction("在资源管理器中显示")
             open_folder_action.triggered.connect(self._on_open_project_folder)
+            menu.addSeparator()
+            trash_action = menu.addAction("回收站...")
+            trash_action.triggered.connect(self._on_open_trash)
             menu.addSeparator()
             close_action = menu.addAction("关闭项目")
             close_action.triggered.connect(self._on_close_project)
@@ -539,6 +670,14 @@ class MainWindow(QMainWindow):
             rename_volume_action.triggered.connect(lambda: self._on_rename_volume(volume_id))
             delete_volume_action = menu.addAction("删除分卷...")
             delete_volume_action.triggered.connect(lambda: self._on_delete_volume(volume_id))
+            menu.addSeparator()
+            export_vol_txt = menu.addAction("导出分卷为 TXT")
+            export_vol_txt.triggered.connect(lambda: self._on_export_volume_txt(volume_id))
+            export_vol_md = menu.addAction("导出分卷为 MD")
+            export_vol_md.triggered.connect(lambda: self._on_export_volume_md(volume_id))
+            menu.addSeparator()
+            import_vol_txt = menu.addAction("从文件夹导入章节...")
+            import_vol_txt.triggered.connect(lambda: self._on_import_volume_dir(volume_id))
 
         # 章节节点
         elif isinstance(data, tuple) and data[0] == "chapter":
@@ -547,8 +686,136 @@ class MainWindow(QMainWindow):
             rename_chapter_action.triggered.connect(lambda: self._on_rename_chapter(chapter_id))
             delete_chapter_action = menu.addAction("删除章节...")
             delete_chapter_action.triggered.connect(lambda: self._on_delete_chapter(chapter_id))
+            menu.addSeparator()
+            export_ch_txt = menu.addAction("导出为 TXT")
+            export_ch_txt.triggered.connect(lambda: self._on_export_chapter_txt(chapter_id))
+            export_ch_md = menu.addAction("导出为 MD")
+            export_ch_md.triggered.connect(lambda: self._on_export_chapter_md(chapter_id))
+            menu.addSeparator()
+            import_ch_file = menu.addAction("从文件导入...")
+            import_ch_file.triggered.connect(lambda: self._on_import_chapter_file(chapter_id))
 
         menu.exec(self._project_tree.viewport().mapToGlobal(pos))
+
+    def _show_batch_chapter_menu(self, pos, selected_chapters):
+        """显示批量章节操作菜单。"""
+        chapter_ids = [si.data(0, Qt.UserRole)[1] for si in selected_chapters]
+        count = len(chapter_ids)
+        menu = QMenu(self)
+        menu.setTitle(f"批量操作 ({count} 个章节)")
+
+        batch_delete = menu.addAction(f"删除选中的 {count} 个章节...")
+        batch_delete.triggered.connect(lambda: self._on_batch_delete_chapters(chapter_ids))
+
+        menu.addSeparator()
+
+        batch_export_txt = menu.addAction(f"导出选中章节为 TXT...")
+        batch_export_txt.triggered.connect(lambda: self._on_batch_export_chapters_txt(chapter_ids))
+
+        batch_export_md = menu.addAction(f"导出选中章节为 MD...")
+        batch_export_md.triggered.connect(lambda: self._on_batch_export_chapters_md(chapter_ids))
+
+        menu.addSeparator()
+
+        # 移动到子菜单
+        move_menu = menu.addMenu("移动到分卷...")
+        session = db_manager.get_session()
+        try:
+            volumes = session.query(Volume).filter_by(
+                project_id=self._current_project_id
+            ).order_by(Volume.sort_order).all()
+            for vol in volumes:
+                vol_action = move_menu.addAction(vol.name)
+                vol_action.triggered.connect(
+                    lambda checked=False, v=vol.id: self._on_batch_move_chapters(chapter_ids, v)
+                )
+        finally:
+            session.close()
+
+        menu.exec(self._project_tree.viewport().mapToGlobal(pos))
+
+    def _on_batch_delete_chapters(self, chapter_ids: list):
+        """批量删除章节。"""
+        reply = QMessageBox.warning(
+            self, "确认批量删除",
+            f"确定要删除选中的 {len(chapter_ids)} 个章节吗？\n此操作不可撤销。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # 关闭已打开的标签页
+        for ch_id in chapter_ids:
+            if ch_id in self._open_chapters:
+                self._close_chapter_tab(ch_id)
+
+        try:
+            for ch_id in chapter_ids:
+                self._chapter_service.delete_chapter(ch_id)
+            self._reload_project_tree()
+            signal_bus.status_message.emit(f"已删除 {len(chapter_ids)} 个章节")
+        except Exception as e:
+            logger.error(f"批量删除章节失败: {e}")
+            QMessageBox.critical(self, "错误", f"批量删除失败：{str(e)}")
+
+    def _on_batch_export_chapters_txt(self, chapter_ids: list):
+        """批量导出选中章节为 TXT。"""
+        dir_path = QFileDialog.getExistingDirectory(self, "选择导出目录")
+        if not dir_path:
+            return
+
+        success = 0
+        for ch_id in chapter_ids:
+            ch = self._chapter_service.get_chapter(ch_id)
+            if not ch:
+                continue
+            file_name = f"第{ch.chapter_number}章 {ch.title}.txt"
+            # 过滤文件名非法字符
+            file_name = re.sub(r'[\\/:*?"<>|]', '', file_name)
+            file_path = str(Path(dir_path) / file_name)
+            try:
+                self._export_service.export_chapter_txt(ch_id, file_path)
+                success += 1
+            except Exception as e:
+                logger.error(f"导出章节 {ch_id} 失败: {e}")
+
+        QMessageBox.information(self, "导出完成", f"成功导出 {success}/{len(chapter_ids)} 个章节")
+        signal_bus.status_message.emit(f"批量导出 TXT 完成: {success}/{len(chapter_ids)}")
+
+    def _on_batch_export_chapters_md(self, chapter_ids: list):
+        """批量导出选中章节为 MD。"""
+        dir_path = QFileDialog.getExistingDirectory(self, "选择导出目录")
+        if not dir_path:
+            return
+
+        success = 0
+        for ch_id in chapter_ids:
+            ch = self._chapter_service.get_chapter(ch_id)
+            if not ch:
+                continue
+            file_name = f"第{ch.chapter_number}章 {ch.title}.md"
+            file_name = re.sub(r'[\\/:*?"<>|]', '', file_name)
+            file_path = str(Path(dir_path) / file_name)
+            try:
+                self._export_service.export_chapter_md(ch_id, file_path)
+                success += 1
+            except Exception as e:
+                logger.error(f"导出章节 {ch_id} 失败: {e}")
+
+        QMessageBox.information(self, "导出完成", f"成功导出 {success}/{len(chapter_ids)} 个章节")
+        signal_bus.status_message.emit(f"批量导出 MD 完成: {success}/{len(chapter_ids)}")
+
+    def _on_batch_move_chapters(self, chapter_ids: list, target_volume_id: int):
+        """批量移动章节到指定分卷。"""
+        try:
+            for ch_id in chapter_ids:
+                self._chapter_service.reorder_chapter(ch_id, target_volume_id, 0)
+            self._reload_project_tree()
+            signal_bus.status_message.emit(f"已移动 {len(chapter_ids)} 个章节")
+        except Exception as e:
+            logger.error(f"批量移动章节失败: {e}")
+            QMessageBox.critical(self, "错误", f"批量移动失败：{str(e)}")
 
     # ========== 分卷操作 ==========
 
@@ -705,6 +972,242 @@ class MainWindow(QMainWindow):
             logger.error(f"删除章节失败: {e}")
             QMessageBox.critical(self, "错误", f"删除章节失败：{str(e)}")
 
+    # ========== 导出/导入操作 ==========
+
+    def _on_import_original(self):
+        """从原版格式导入项目。"""
+        if self._current_project_id is not None:
+            reply = QMessageBox.question(
+                self, "确认导入",
+                "导入操作将创建一个新项目，当前项目不受影响。是否继续？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        dir_path = QFileDialog.getExistingDirectory(self, "选择原版项目目录")
+        if not dir_path:
+            return
+
+        try:
+            project_id = ImportService.import_original_project(dir_path)
+            self._load_project_tree(project_id)
+            signal_bus.status_message.emit("原版项目导入成功")
+        except Exception as e:
+            logger.error(f"导入原版项目失败: {e}")
+            QMessageBox.critical(self, "导入失败", f"导入原版项目失败：\n{str(e)}")
+
+    def _get_project_name(self, project_id: int) -> str:
+        """获取项目名称。"""
+        session = db_manager.get_session()
+        try:
+            project = session.query(Project).filter_by(id=project_id).first()
+            return project.name if project else ""
+        finally:
+            session.close()
+
+    def _on_export_txt(self):
+        """导出全本为 TXT。"""
+        if self._current_project_id is None:
+            QMessageBox.warning(self, "提示", "请先打开一个项目")
+            return
+
+        project_name = self._get_project_name(self._current_project_id)
+        if not project_name:
+            return
+
+        default_name = f"{project_name}.txt"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出为 TXT", default_name, "文本文件 (*.txt)"
+        )
+        if not file_path:
+            return
+
+        try:
+            self._export_service.export_txt(self._current_project_id, file_path)
+            signal_bus.status_message.emit(f"TXT 导出成功: {file_path}")
+        except Exception as e:
+            logger.error(f"TXT 导出失败: {e}")
+            QMessageBox.critical(self, "导出失败", f"TXT 导出失败：\n{str(e)}")
+
+    def _on_export_md(self):
+        """导出全本为 Markdown。"""
+        if self._current_project_id is None:
+            QMessageBox.warning(self, "提示", "请先打开一个项目")
+            return
+
+        project_name = self._get_project_name(self._current_project_id)
+        if not project_name:
+            return
+
+        default_name = f"{project_name}.md"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出为 Markdown", default_name, "Markdown 文件 (*.md)"
+        )
+        if not file_path:
+            return
+
+        try:
+            self._export_service.export_md(self._current_project_id, file_path)
+            signal_bus.status_message.emit(f"Markdown 导出成功: {file_path}")
+        except Exception as e:
+            logger.error(f"Markdown 导出失败: {e}")
+            QMessageBox.critical(self, "导出失败", f"Markdown 导出失败：\n{str(e)}")
+
+    def _on_export_epub(self):
+        """导出全本为 EPUB。"""
+        if self._current_project_id is None:
+            QMessageBox.warning(self, "提示", "请先打开一个项目")
+            return
+
+        project_name = self._get_project_name(self._current_project_id)
+        if not project_name:
+            return
+
+        title, ok = QInputDialog.getText(self, "EPUB 导出", "请输入书名：", text=project_name)
+        if not ok or not title:
+            return
+        author, ok = QInputDialog.getText(self, "EPUB 导出", "请输入作者名：")
+        if not ok:
+            return
+
+        default_name = f"{project_name}.epub"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出为 EPUB", default_name, "EPUB 电子书 (*.epub)"
+        )
+        if not file_path:
+            return
+
+        settings = {"author": author}
+        try:
+            self._export_service.export_epub(self._current_project_id, file_path, settings)
+            signal_bus.status_message.emit(f"EPUB 导出成功: {file_path}")
+        except Exception as e:
+            logger.error(f"EPUB 导出失败: {e}")
+            QMessageBox.critical(self, "导出失败", f"EPUB 导出失败：\n{str(e)}")
+
+    def _on_export_pdf(self):
+        """导出全本为 PDF。"""
+        if self._current_project_id is None:
+            QMessageBox.warning(self, "提示", "请先打开一个项目")
+            return
+
+        project_name = self._get_project_name(self._current_project_id)
+        if not project_name:
+            return
+
+        title, ok = QInputDialog.getText(self, "PDF 导出", "请输入书名：", text=project_name)
+        if not ok or not title:
+            return
+        author, ok = QInputDialog.getText(self, "PDF 导出", "请输入作者名：")
+        if not ok:
+            return
+        font_size, ok = QInputDialog.getInt(self, "PDF 导出", "请输入字号：", value=12, min=8, max=48)
+        if not ok:
+            return
+
+        default_name = f"{project_name}.pdf"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出为 PDF", default_name, "PDF 文件 (*.pdf)"
+        )
+        if not file_path:
+            return
+
+        settings = {"author": author, "font_size": font_size}
+        try:
+            self._export_service.export_pdf(self._current_project_id, file_path, settings)
+            signal_bus.status_message.emit(f"PDF 导出成功: {file_path}")
+        except Exception as e:
+            logger.error(f"PDF 导出失败: {e}")
+            QMessageBox.critical(self, "导出失败", f"PDF 导出失败：\n{str(e)}")
+
+    def _on_export_original(self):
+        """导出为原版格式。"""
+        if self._current_project_id is None:
+            QMessageBox.warning(self, "提示", "请先打开一个项目")
+            return
+
+        project_name = self._get_project_name(self._current_project_id)
+        if not project_name:
+            return
+
+        dir_path = QFileDialog.getExistingDirectory(self, "选择导出目标目录")
+        if not dir_path:
+            return
+
+        target_path = str(Path(dir_path) / project_name)
+        try:
+            self._export_service.export_to_original(self._current_project_id, target_path)
+            signal_bus.status_message.emit(f"原版格式导出成功: {target_path}")
+        except Exception as e:
+            logger.error(f"原版格式导出失败: {e}")
+            QMessageBox.critical(self, "导出失败", f"原版格式导出失败：\n{str(e)}")
+
+    def _on_export_chapter_txt(self, chapter_id: int):
+        """导出单章为 TXT。"""
+        default_name = f"chapter_{chapter_id}.txt"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出章节为 TXT", default_name, "文本文件 (*.txt)"
+        )
+        if not file_path:
+            return
+
+        try:
+            self._export_service.export_chapter_txt(chapter_id, file_path)
+            signal_bus.status_message.emit(f"章节 TXT 导出成功: {file_path}")
+        except Exception as e:
+            logger.error(f"章节 TXT 导出失败: {e}")
+            QMessageBox.critical(self, "导出失败", f"章节 TXT 导出失败：\n{str(e)}")
+
+    def _on_export_chapter_md(self, chapter_id: int):
+        """导出单章为 Markdown。"""
+        default_name = f"chapter_{chapter_id}.md"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出章节为 Markdown", default_name, "Markdown 文件 (*.md)"
+        )
+        if not file_path:
+            return
+
+        try:
+            self._export_service.export_chapter_md(chapter_id, file_path)
+            signal_bus.status_message.emit(f"章节 MD 导出成功: {file_path}")
+        except Exception as e:
+            logger.error(f"章节 MD 导出失败: {e}")
+            QMessageBox.critical(self, "导出失败", f"章节 MD 导出失败：\n{str(e)}")
+
+    def _on_export_volume_txt(self, volume_id: int):
+        """导出分卷为 TXT。"""
+        default_name = f"volume_{volume_id}.txt"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出分卷为 TXT", default_name, "文本文件 (*.txt)"
+        )
+        if not file_path:
+            return
+
+        try:
+            self._export_service.export_volume_txt(volume_id, file_path)
+            signal_bus.status_message.emit(f"分卷 TXT 导出成功: {file_path}")
+        except Exception as e:
+            logger.error(f"分卷 TXT 导出失败: {e}")
+            QMessageBox.critical(self, "导出失败", f"分卷 TXT 导出失败：\n{str(e)}")
+
+    def _on_export_volume_md(self, volume_id: int):
+        """导出分卷为 Markdown。"""
+        default_name = f"volume_{volume_id}.md"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出分卷为 Markdown", default_name, "Markdown 文件 (*.md)"
+        )
+        if not file_path:
+            return
+
+        try:
+            self._export_service.export_volume_md(volume_id, file_path)
+            signal_bus.status_message.emit(f"分卷 MD 导出成功: {file_path}")
+        except Exception as e:
+            logger.error(f"分卷 MD 导出失败: {e}")
+            QMessageBox.critical(self, "导出失败", f"分卷 MD 导出失败：\n{str(e)}")
+
     # ========== 辅助方法 ==========
 
     def _close_chapter_tab(self, chapter_id: int):
@@ -741,10 +1244,14 @@ class MainWindow(QMainWindow):
             logger.warning(f"章节不存在: {chapter_id}")
             return
 
-        editor = EditorWidget()
+        container = EditorContainer()
+        editor = container.editor
         editor.set_content(chapter.content or "")
         # 应用撤销栈深度
         self._apply_undo_stack_depth_to_editor(editor)
+        # 撤销/重做按钮
+        editor.undoAvailable.connect(self._undo_act.setEnabled)
+        editor.redoAvailable.connect(self._redo_act.setEnabled)
         # AI 功能（右键菜单已由 EditorWidget 内置中文版）
         editor.ai_continue_requested.connect(self._on_ai_continue_write)
         editor.ai_polish_requested.connect(self._on_ai_polish)
@@ -752,9 +1259,20 @@ class MainWindow(QMainWindow):
         editor.ai_analyze_requested.connect(self._on_ai_analyze)
         editor.content_changed.connect(lambda cid=chapter_id: self._on_editor_content_changed(cid))
 
+        search_panel = container.search_panel
+        search_panel.search_text_changed.connect(self._on_search_text_changed)
+        search_panel.search_next.connect(self._on_search_next)
+        search_panel.search_prev.connect(self._on_search_prev)
+        search_panel.replace.connect(self._on_replace)
+        search_panel.replace_all.connect(self._on_replace_all)
+        search_panel.close_panel.connect(self._on_close_search_panel)
+        search_panel.search_options_changed.connect(self._do_search)
+        search_panel.in_selection_changed.connect(lambda: self._do_search())
+        container.search_result_clicked.connect(self._on_search_result_clicked)
+
         tab_title = f"第{chapter.chapter_number}章 {chapter.title}"
-        tab_index = self._editor_tabs.addTab(editor, tab_title)
-        self._open_chapters[chapter_id] = (tab_index, editor)
+        tab_index = self._editor_tabs.addTab(container, tab_title)
+        self._open_chapters[chapter_id] = (tab_index, container)
 
         self._editor_tabs.setCurrentIndex(tab_index)
         self._update_status_word_count(editor)
@@ -762,7 +1280,8 @@ class MainWindow(QMainWindow):
     def _on_editor_content_changed(self, chapter_id: int):
         if chapter_id not in self._open_chapters:
             return
-        tab_index, editor = self._open_chapters[chapter_id]
+        tab_index, container = self._open_chapters[chapter_id]
+        editor = container.editor if isinstance(container, EditorContainer) else container
         tab_text = self._editor_tabs.tabText(tab_index)
         if not tab_text.endswith("*"):
             self._editor_tabs.setTabText(tab_index, tab_text + "*")
@@ -774,12 +1293,13 @@ class MainWindow(QMainWindow):
         if index < 0:
             self._current_chapter_id = None
             return
-        for chapter_id, (tab_idx, editor) in self._open_chapters.items():
+        for chapter_id, (tab_idx, container) in self._open_chapters.items():
             if tab_idx == index:
                 self._current_chapter_id = chapter_id
+                editor = container.editor if isinstance(container, EditorContainer) else container
                 self._update_status_word_count(editor)
-                # 如果搜索面板打开，重新搜索当前标签页
-                if self._search_panel.isVisible() and self._search_panel.search_input.text():
+                search_panel = self._get_current_search_panel()
+                if search_panel and search_panel.isVisible() and search_panel.search_input.text():
                     self._do_search()
                 return
         # 没有匹配的章节（例如欢迎页）
@@ -901,6 +1421,86 @@ class MainWindow(QMainWindow):
 
         self._editor_tabs.removeTab(index)
 
+    def _on_tab_bar_context_menu(self, pos):
+        """编辑器标签页右键菜单（批量关闭）。"""
+        tab_bar = self._editor_tabs.tabBar()
+        tab_index = tab_bar.tabAt(pos)
+
+        menu = QMenu(self)
+
+        if self._open_chapters:
+            close_all_action = menu.addAction("关闭所有标签页")
+            close_all_action.triggered.connect(self._on_close_all_tabs)
+
+            close_others_action = menu.addAction("关闭其他标签页")
+            if tab_index >= 0:
+                close_others_action.triggered.connect(
+                    lambda: self._on_close_other_tabs(tab_index)
+                )
+            else:
+                close_others_action.setEnabled(False)
+
+            menu.addSeparator()
+
+        close_current_action = menu.addAction("关闭当前标签页")
+        if tab_index >= 0:
+            close_current_action.triggered.connect(
+                lambda: self._close_editor_tab(tab_index)
+            )
+        else:
+            close_current_action.setEnabled(False)
+
+        menu.exec(tab_bar.mapToGlobal(pos))
+
+    def _on_close_all_tabs(self):
+        """关闭所有编辑器标签页。"""
+        # 检查是否有未保存的更改
+        unsaved = [ch_id for ch_id, (_, editor) in self._open_chapters.items()
+                   if editor.is_modified()]
+        if unsaved:
+            reply = QMessageBox.question(
+                self, "未保存的更改",
+                f"有 {len(unsaved)} 个标签页未保存，是否全部保存？",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.Save,
+            )
+            if reply == QMessageBox.Cancel:
+                return
+            elif reply == QMessageBox.Save:
+                for ch_id in unsaved:
+                    self._save_chapter(ch_id)
+
+        self._open_chapters.clear()
+        # 保留欢迎页
+        self._editor_tabs.clear()
+        self._show_welcome_page()
+
+    def _on_close_other_tabs(self, keep_index: int):
+        """关闭除指定标签页外的所有标签页。"""
+        # 收集要保留的 chapter_id
+        keep_chapter_id = None
+        for ch_id, (tab_idx, _) in self._open_chapters.items():
+            if tab_idx == keep_index:
+                keep_chapter_id = ch_id
+                break
+
+        # 从后往前关闭，避免索引变化
+        tab_indices = sorted(
+            [tab_idx for ch_id, (tab_idx, _) in self._open_chapters.items()
+             if tab_idx != keep_index],
+            reverse=True,
+        )
+        for idx in tab_indices:
+            self._editor_tabs.removeTab(idx)
+
+        # 重建 _open_chapters（只保留保留的章节）
+        if keep_chapter_id is not None:
+            container = self._open_chapters[keep_chapter_id][1]
+            self._open_chapters.clear()
+            self._open_chapters[keep_chapter_id] = (0, container)
+        else:
+            self._open_chapters.clear()
+
     def _switch_theme(self, theme: str):
         app = QApplication.instance()
         style_manager.apply_theme(app, theme)
@@ -958,23 +1558,18 @@ class MainWindow(QMainWindow):
 
     def _refresh_stats(self):
         if self._current_project_id:
-            session = db_manager.get_session()
             try:
-                project = session.query(Project).filter_by(id=self._current_project_id).first()
-                if not project:
-                    self._stats_panel.clear()
+                if not db_manager.is_project_open:
                     return
+                session = db_manager.get_project_session()
 
                 chapters = session.query(Chapter).filter_by(
-                    project_id=self._current_project_id,
                     is_deleted=False
                 ).all()
 
                 total_words = sum(ch.word_count or 0 for ch in chapters)
                 chapter_count = len(chapters)
-                volume_count = session.query(Volume).filter_by(
-                    project_id=self._current_project_id
-                ).count()
+                volume_count = session.query(Volume).count()
 
                 avg_chars_per_chapter = 0
                 if chapter_count > 0:
@@ -986,9 +1581,6 @@ class MainWindow(QMainWindow):
                     "volume_count": volume_count,
                     "avg_chars_per_chapter": avg_chars_per_chapter,
                 }
-
-                if project.target_words and project.target_words > 0:
-                    stats["target_words"] = project.target_words
 
                 self._stats_panel.update_stats(stats)
             finally:
@@ -1009,19 +1601,23 @@ class MainWindow(QMainWindow):
             root.setData(0, Qt.UserRole, project.id)
             self._project_tree.addTopLevelItem(root)
 
-            volumes = session.query(Volume).filter_by(project_id=project_id).order_by(Volume.sort_order).all()
-            for v in volumes:
-                vol_item = QTreeWidgetItem([v.name])
-                vol_item.setData(0, Qt.UserRole, ("volume", v.id))
-                root.addChild(vol_item)
+            p_session = db_manager.get_project_session()
+            try:
+                volumes = p_session.query(Volume).order_by(Volume.volume_number).all()
+                for v in volumes:
+                    vol_item = QTreeWidgetItem([v.title])
+                    vol_item.setData(0, Qt.UserRole, ("volume", v.id))
+                    root.addChild(vol_item)
 
-                chapters = session.query(Chapter).filter_by(
-                    volume_id=v.id, is_deleted=False
-                ).order_by(Chapter.chapter_number).all()
-                for ch in chapters:
-                    ch_item = QTreeWidgetItem([f"第{ch.chapter_number}章 {ch.title}"])
-                    ch_item.setData(0, Qt.UserRole, ("chapter", ch.id))
-                    vol_item.addChild(ch_item)
+                    chapters = p_session.query(Chapter).filter_by(
+                        volume_id=v.id, is_deleted=False
+                    ).order_by(Chapter.chapter_number).all()
+                    for ch in chapters:
+                        ch_item = QTreeWidgetItem([f"第{ch.chapter_number}章 {ch.title}"])
+                        ch_item.setData(0, Qt.UserRole, ("chapter", ch.id))
+                        vol_item.addChild(ch_item)
+            finally:
+                p_session.close()
 
             root.setExpanded(True)
         finally:
@@ -1054,6 +1650,7 @@ class MainWindow(QMainWindow):
                 project = session.query(Project).filter_by(name=name).first()
 
             if project:
+                db_manager.open_project(project.path)
                 self._project_service.open_project(project.id)
                 self._add_to_recent(project.name, project.path)
                 self._update_recent_menu()
@@ -1219,10 +1816,10 @@ class MainWindow(QMainWindow):
         undo_btn.clicked.connect(lambda checked, s=snapshot, t=toast: self._undo_reorder(s, t))
         layout.addWidget(undo_btn)
 
-        # 将提示条插入到编辑器标签页下方、搜索面板上方
+        # 将提示条插入到编辑器标签页下方
         central_layout = self.centralWidget().layout()
-        # central_layout 中有 _editor_tabs (index 0) 和 _search_panel (index 1)
-        central_layout.insertWidget(1, toast)
+        # central_layout 中只有 _editor_tabs (index 0)，搜索面板在每个 EditorContainer 内部
+        central_layout.addWidget(toast)
 
         # 5 秒后自动消失
         QTimer.singleShot(5000, toast.deleteLater)
@@ -1271,30 +1868,57 @@ class MainWindow(QMainWindow):
         self._current_match_index = -1
         self._current_search_keyword = ""
 
+    def _get_current_container(self):
+        """获取当前标签页的 EditorContainer。"""
+        current_index = self._editor_tabs.currentIndex()
+        if current_index < 0:
+            return None
+        for chapter_id, (tab_idx, container) in self._open_chapters.items():
+            if tab_idx == current_index and isinstance(container, EditorContainer):
+                return container
+        return None
+
+    def _get_current_search_panel(self):
+        current_index = self._editor_tabs.currentIndex()
+        if current_index < 0:
+            return None
+        for chapter_id, (tab_idx, container) in self._open_chapters.items():
+            if tab_idx == current_index and isinstance(container, EditorContainer):
+                return container.search_panel
+        return None
+
     def _toggle_search_panel(self):
-        if self._search_panel.isVisible():
+        container = self._get_current_container()
+        if not container:
+            return
+        search_panel = container.search_panel
+        if search_panel.isVisible():
             self._on_close_search_panel()
         else:
-            self._search_panel.setVisible(True)
-            self._search_panel.focus_search()
-            editor = self._get_current_editor()
-            if editor:
-                selected_text = editor.textCursor().selectedText()
-                if selected_text:
-                    self._search_panel.set_search_text(selected_text)
+            editor = container.editor
+            # 通过 show_search 打开，确保正确定位到右上角
+            container.show_search()
+            has_selection = editor.textCursor().hasSelection()
+            search_panel.set_selection_available(has_selection)
+            selected_text = editor.textCursor().selectedText()
+            if selected_text:
+                search_panel.set_search_text(selected_text)
+                self._do_search()
+            else:
+                keyword = search_panel.search_input.text()
+                if keyword:
                     self._do_search()
-                else:
-                    keyword = self._search_panel.search_input.text()
-                    if keyword:
-                        self._do_search()
 
     def _get_current_editor(self):
         current_index = self._editor_tabs.currentIndex()
         if current_index < 0:
             return None
-        for chapter_id, (tab_idx, editor) in self._open_chapters.items():
-            if tab_idx == current_index and isinstance(editor, EditorWidget):
-                return editor
+        for chapter_id, (tab_idx, container) in self._open_chapters.items():
+            if tab_idx == current_index:
+                if isinstance(container, EditorContainer):
+                    return container.editor
+                elif isinstance(container, EditorWidget):
+                    return container
         return None
 
     def _on_search_text_changed(self, keyword: str):
@@ -1303,61 +1927,150 @@ class MainWindow(QMainWindow):
     def _do_search(self):
         """执行搜索并高亮结果。"""
         editor = self._get_current_editor()
-        if not editor:
-            self._search_panel.set_match_count(0, 0)
+        search_panel = self._get_current_search_panel()
+        if not editor or not search_panel:
             return
 
-        keyword = self._search_panel.search_input.text()
+        keyword = search_panel.search_input.text()
         self._current_search_keyword = keyword
 
         if not keyword:
             self._clear_all_highlights()
             self._current_matches = []
             self._current_match_index = -1
-            self._search_panel.set_match_count(0, 0)
+            search_panel.set_match_count(0, 0)
             return
 
-        self._highlight_matches(editor, keyword)
+        self._highlight_matches(editor, keyword, search_panel)
 
-    def _highlight_matches(self, editor: EditorWidget, keyword: str):
+    def _highlight_matches(self, editor: EditorWidget, keyword: str, search_panel):
         self._clear_all_highlights()
         self._current_matches = []
         self._current_match_index = -1
 
         if not keyword:
-            self._search_panel.set_match_count(0, 0)
+            search_panel.set_match_count(0, 0)
             return
 
-        extra_selections = []
-        highlight_format = QTextCharFormat()
-        highlight_format.setBackground(QBrush(QColor("#f0c674")))
+        sel_start = -1
+        sel_end = -1
+        if search_panel.in_selection:
+            cursor = editor.textCursor()
+            if cursor.hasSelection():
+                sel_start = cursor.selectionStart()
+                sel_end = cursor.selectionEnd()
 
-        search_cursor = QTextCursor(editor.document())
-        while True:
-            search_cursor = editor.document().find(keyword, search_cursor)
-            if search_cursor.isNull():
-                break
-            extra_selection = QTextEdit.ExtraSelection()
-            extra_selection.cursor = search_cursor
-            extra_selection.format = highlight_format
-            extra_selections.append(extra_selection)
-            # 存储匹配开始和结束位置
-            self._current_matches.append((
-                search_cursor.selectionStart(),
-                search_cursor.selectionEnd()
-            ))
+        # 构建查找参数
+        if search_panel.use_regex:
+            # 正则表达式匹配
+            try:
+                options = QRegularExpression.NoPatternOption if search_panel.case_sensitive else QRegularExpression.CaseInsensitiveOption
+                pattern = QRegularExpression(keyword, options)
+                if not pattern.isValid():
+                    search_panel.match_label.setText("正则错误")
+                    search_panel.match_label.setStyleSheet("color: #f7768e;")
+                    return
+            except Exception:
+                search_panel.set_match_count(0, 0)
+                return
 
-        editor.setExtraSelections(extra_selections)
+            doc = editor.document()
+            cursor = QTextCursor(doc)
+            if sel_start >= 0:
+                cursor.setPosition(sel_start)
+            while True:
+                cursor = doc.find(pattern, cursor)
+                if cursor.isNull():
+                    break
+                match_start = cursor.selectionStart()
+                match_end = cursor.selectionEnd()
+                if sel_start >= 0 and (match_start < sel_start or match_end > sel_end):
+                    if match_start > sel_end:
+                        break
+                    continue
+                self._current_matches.append((match_start, match_end))
+        else:
+            # 普通文本匹配
+            flags = QTextDocument.FindFlag(0)
+            if search_panel.case_sensitive:
+                flags |= QTextDocument.FindFlag.FindCaseSensitively
+            if search_panel.whole_word:
+                flags |= QTextDocument.FindFlag.FindWholeWords
+            if search_panel.search_backward:
+                flags |= QTextDocument.FindFlag.FindBackward
+
+            doc = editor.document()
+            cursor = QTextCursor(doc)
+            if sel_start >= 0:
+                cursor.setPosition(sel_end if search_panel.search_backward else sel_start)
+            else:
+                # 反向查找：从光标当前位置开始向后
+                ec = editor.textCursor()
+                if search_panel.search_backward:
+                    cursor.setPosition(ec.selectionStart())
+            while True:
+                cursor = doc.find(keyword, cursor, flags)
+                if cursor.isNull():
+                    break
+                match_start = cursor.selectionStart()
+                match_end = cursor.selectionEnd()
+                if sel_start >= 0 and (match_start < sel_start or match_end > sel_end):
+                    if match_start > sel_end:
+                        break
+                    continue
+                self._current_matches.append((match_start, match_end))
+                if search_panel.search_backward and cursor.atStart():
+                    break
+
+        # 设置高亮
+        self._update_highlights(editor)
+
+        # 更新搜索结果列表
+        container = self._get_current_container()
+        if container:
+            container.update_search_results(self._current_matches, editor)
 
         total = len(self._current_matches)
         if total > 0:
             self._current_match_index = 0
             self._goto_match(0, editor)
-        self._search_panel.set_match_count(self._current_match_index + 1 if total > 0 else 0, total)
+        search_panel.set_match_count(self._current_match_index + 1 if total > 0 else 0, total)
+
+    def _update_highlights(self, editor: EditorWidget):
+        """更新编辑器高亮：所有匹配项浅色，当前匹配项突出色。"""
+        extra_selections = []
+
+        # 所有匹配项 - 浅色背景
+        all_format = QTextCharFormat()
+        all_format.setBackground(QBrush(QColor(255, 220, 0, 60)))
+
+        for i, (start, end) in enumerate(self._current_matches):
+            sel = QTextEdit.ExtraSelection()
+            sel.cursor = QTextCursor(editor.document())
+            sel.cursor.setPosition(start)
+            sel.cursor.setPosition(end, QTextCursor.KeepAnchor)
+            sel.format = all_format
+            extra_selections.append(sel)
+
+        # 当前匹配项 - 突出色
+        if 0 <= self._current_match_index < len(self._current_matches):
+            current_format = QTextCharFormat()
+            current_format.setBackground(QBrush(QColor("#f0c674")))
+
+            start, end = self._current_matches[self._current_match_index]
+            sel = QTextEdit.ExtraSelection()
+            sel.cursor = QTextCursor(editor.document())
+            sel.cursor.setPosition(start)
+            sel.cursor.setPosition(end, QTextCursor.KeepAnchor)
+            sel.format = current_format
+            extra_selections.append(sel)
+
+        editor.setExtraSelections(extra_selections)
 
     def _clear_all_highlights(self):
         """清除所有打开的编辑器的高亮。"""
-        for chapter_id, (tab_idx, editor) in self._open_chapters.items():
+        for chapter_id, (tab_idx, container) in self._open_chapters.items():
+            editor = container.editor if isinstance(container, EditorContainer) else container
             if isinstance(editor, EditorWidget):
                 editor.setExtraSelections([])
 
@@ -1366,22 +2079,24 @@ class MainWindow(QMainWindow):
             self._do_search()
             return
         editor = self._get_current_editor()
-        if not editor:
+        search_panel = self._get_current_search_panel()
+        if not editor or not search_panel:
             return
         self._current_match_index = (self._current_match_index + 1) % len(self._current_matches)
         self._goto_match(self._current_match_index, editor)
-        self._search_panel.set_match_count(self._current_match_index + 1, len(self._current_matches))
+        search_panel.set_match_count(self._current_match_index + 1, len(self._current_matches))
 
     def _on_search_prev(self):
         if not self._current_matches:
             self._do_search()
             return
         editor = self._get_current_editor()
-        if not editor:
+        search_panel = self._get_current_search_panel()
+        if not editor or not search_panel:
             return
         self._current_match_index = (self._current_match_index - 1) % len(self._current_matches)
         self._goto_match(self._current_match_index, editor)
-        self._search_panel.set_match_count(self._current_match_index + 1, len(self._current_matches))
+        search_panel.set_match_count(self._current_match_index + 1, len(self._current_matches))
 
     def _goto_match(self, index: int, editor: EditorWidget):
         if index < 0 or index >= len(self._current_matches):
@@ -1392,9 +2107,40 @@ class MainWindow(QMainWindow):
         cursor.setPosition(end, QTextCursor.KeepAnchor)
         editor.setTextCursor(cursor)
         editor.ensureCursorVisible()
+        # 更新高亮以突出当前匹配
+        self._update_highlights(editor)
+
+    def _on_search_result_clicked(self, match_index: int):
+        """点击搜索结果列表项时跳转到对应位置。"""
+        editor = self._get_current_editor()
+        search_panel = self._get_current_search_panel()
+        if not editor or not search_panel:
+            return
+        if 0 <= match_index < len(self._current_matches):
+            self._current_match_index = match_index
+            self._goto_match(match_index, editor)
+            search_panel.set_match_count(match_index + 1, len(self._current_matches))
+
+    def _apply_preserve_case(self, original: str, replacement: str) -> str:
+        """根据原文本的大小写模式调整替换文本的大小写。"""
+        if not original or not replacement:
+            return replacement
+
+        if original.isupper():
+            return replacement.upper()
+        elif original.islower():
+            return replacement.lower()
+        elif original[0].isupper() and original[1:].islower():
+            if len(replacement) > 0:
+                return replacement[0].upper() + replacement[1:].lower()
+            return replacement
+        elif original.istitle():
+            return replacement.title()
+        return replacement
 
     def _on_replace(self, search_text: str, replace_text: str):
         editor = self._get_current_editor()
+        search_panel = self._get_current_search_panel()
         if not editor or not search_text:
             return
 
@@ -1403,40 +2149,69 @@ class MainWindow(QMainWindow):
             if not self._current_matches:
                 return
 
-        # 如果当前匹配索引无效，重置到0
         if self._current_match_index < 0:
             self._current_match_index = 0
 
-        # 使用存储的位置直接替换
         start, end = self._current_matches[self._current_match_index]
         cursor = QTextCursor(editor.document())
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.KeepAnchor)
+        original_text = cursor.selectedText()
+
+        final_replace_text = replace_text
+        if search_panel and search_panel.preserve_case:
+            final_replace_text = self._apply_preserve_case(original_text, replace_text)
+
         editor.setTextCursor(cursor)
-        cursor.insertText(replace_text)
+        cursor.insertText(final_replace_text)
 
         editor.content_changed.emit()
         self._do_search()
 
     def _on_replace_all(self, search_text: str, replace_text: str):
         editor = self._get_current_editor()
+        search_panel = self._get_current_search_panel()
         if not editor or not search_text:
             return
 
-        content = editor.toPlainText()
-        new_content = content.replace(search_text, replace_text)
-        if new_content != content:
-            cursor_pos = editor.textCursor().position()
-            editor.setPlainText(new_content)
-            cursor = editor.textCursor()
-            cursor.setPosition(min(cursor_pos, len(new_content)))
-            editor.setTextCursor(cursor)
+        if not search_panel or not search_panel.preserve_case:
+            content = editor.toPlainText()
+            new_content = content.replace(search_text, replace_text)
+            if new_content != content:
+                cursor_pos = editor.textCursor().position()
+                editor.setPlainText(new_content)
+                cursor = editor.textCursor()
+                cursor.setPosition(min(cursor_pos, len(new_content)))
+                editor.setTextCursor(cursor)
+                editor._modified = True
+                editor.content_changed.emit()
+                self._do_search()
+        else:
+            if not self._current_matches:
+                self._do_search()
+            if not self._current_matches:
+                return
+
+            cursor = QTextCursor(editor.document())
+            cursor.beginEditBlock()
+            for i in range(len(self._current_matches) - 1, -1, -1):
+                start, end = self._current_matches[i]
+                sel_cursor = QTextCursor(editor.document())
+                sel_cursor.setPosition(start)
+                sel_cursor.setPosition(end, QTextCursor.KeepAnchor)
+                original_text = sel_cursor.selectedText()
+                final_replace_text = self._apply_preserve_case(original_text, replace_text)
+                sel_cursor.insertText(final_replace_text)
+            cursor.endEditBlock()
+
             editor._modified = True
             editor.content_changed.emit()
             self._do_search()
 
     def _on_close_search_panel(self):
-        self._search_panel.setVisible(False)
+        container = self._get_current_container()
+        if container:
+            container.hide_search()
         self._clear_all_highlights()
         self._current_matches = []
         self._current_match_index = -1
@@ -1577,6 +2352,12 @@ class MainWindow(QMainWindow):
         """AI 重试状态更新。"""
         if self._ai_panel is not None:
             self._ai_panel.set_status(f"连接异常，第 {attempt}/{max_retries} 次重试...")
+
+    def _on_app_settings(self):
+        """打开应用设置对话框。"""
+        from ui.dialogs.app_settings_dialog import AppSettingsDialog
+        dialog = AppSettingsDialog(self)
+        dialog.exec()
 
     def _on_ai_settings(self):
         """打开 AI 设置对话框。"""
@@ -1782,3 +2563,151 @@ class MainWindow(QMainWindow):
             self._ai_panel.set_status("分析完成")
             # 在 AI 面板的对话区显示分析结果
             self._ai_panel.add_system_message(f"章节分析报告\n\n{full_text}")
+
+    # ========== TXT/MD 导入 ==========
+
+    def _on_import_txt(self):
+        """从 TXT/MD 文件导入全本。"""
+        if not self._current_project_id:
+            QMessageBox.information(self, "提示", "请先打开一个项目")
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择 TXT/MD 文件", "", "文本文件 (*.txt *.md);;所有文件 (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            sections = self._txt_import_service.split_full_book(file_path)
+            if not sections:
+                QMessageBox.information(self, "提示", "未能识别任何章节内容")
+                return
+
+            dialog = ImportPreviewDialog(sections, self._current_project_id, self)
+            if dialog.exec() == QDialog.Accepted:
+                volume_id = dialog.get_target_volume_id()
+                target_name = dialog.get_new_volume_name() if volume_id is None else None
+                result = self._txt_import_service.import_full_book(
+                    file_path, self._current_project_id,
+                    volume_id=volume_id, target_name=target_name
+                )
+                QMessageBox.information(
+                    self, "导入完成",
+                    f"成功导入 {result['success']} 个章节"
+                )
+                self._reload_project_tree()
+        except Exception as e:
+            QMessageBox.critical(self, "导入失败", str(e))
+
+    def _reload_project_tree(self):
+        """刷新项目树（无参数版本）。"""
+        if self._current_project_id:
+            self._load_project_tree(self._current_project_id)
+
+    def _on_import_epub(self):
+        """从 EPUB 文件导入全本。"""
+        if not self._current_project_id:
+            QMessageBox.information(self, "提示", "请先打开一个项目")
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择 EPUB 文件", "", "EPUB 电子书 (*.epub);;所有文件 (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            sections = EpubImportService._parse_epub(file_path)
+            if not sections:
+                QMessageBox.information(self, "提示", "未能识别任何章节内容")
+                return
+
+            dialog = ImportPreviewDialog(sections, self._current_project_id, self)
+            if dialog.exec() == QDialog.Accepted:
+                volume_id = dialog.get_target_volume_id()
+                target_name = dialog.get_new_volume_name() if volume_id is None else None
+                result = EpubImportService.import_epub_full_book(
+                    file_path, self._current_project_id,
+                    volume_id=volume_id, target_name=target_name
+                )
+                QMessageBox.information(
+                    self, "导入完成",
+                    f"成功导入 {result['success']} 个章节"
+                )
+                self._reload_project_tree()
+        except Exception as e:
+            QMessageBox.critical(self, "导入失败", str(e))
+
+    def _on_import_pdf(self):
+        """从 PDF 文件导入全本。"""
+        if not self._current_project_id:
+            QMessageBox.information(self, "提示", "请先打开一个项目")
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择 PDF 文件", "", "PDF 文件 (*.pdf);;所有文件 (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            sections = PdfImportService._parse_pdf(file_path)
+            if not sections:
+                QMessageBox.information(self, "提示", "未能识别任何章节内容")
+                return
+
+            dialog = ImportPreviewDialog(sections, self._current_project_id, self)
+            if dialog.exec() == QDialog.Accepted:
+                volume_id = dialog.get_target_volume_id()
+                target_name = dialog.get_new_volume_name() if volume_id is None else None
+                result = PdfImportService.import_pdf_full_book(
+                    file_path, self._current_project_id,
+                    volume_id=volume_id, target_name=target_name
+                )
+                QMessageBox.information(
+                    self, "导入完成",
+                    f"成功导入 {result['success']} 个章节"
+                )
+                self._reload_project_tree()
+        except Exception as e:
+            QMessageBox.critical(self, "导入失败", str(e))
+
+    def _on_import_chapter_file(self, chapter_id: int):
+        """从文件导入替换单章内容。"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择文件", "", "文本文件 (*.txt *.md);;所有文件 (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            chapter = self._txt_import_service.import_chapter_from_file(file_path, chapter_id)
+            # 刷新编辑器
+            for cid, (tab_idx, container) in self._open_chapters.items():
+                if cid == chapter_id:
+                    # 找到编辑器并更新内容
+                    editor = container.editor
+                    editor.set_content(chapter.content or "")
+                    editor.set_modified(False)
+                    # 更新状态栏
+                    wc = editor.count_words()
+                    pc = editor.count_paragraphs()
+                    signal_bus.status_message.emit(f"已导入: {wc} 字, {pc} 段")
+                    break
+            signal_bus.word_count_updated.emit()
+        except Exception as e:
+            QMessageBox.critical(self, "导入失败", str(e))
+
+    def _on_import_volume_dir(self, volume_id: int):
+        """从文件夹批量导入章节到分卷。"""
+        dir_path = QFileDialog.getExistingDirectory(self, "选择包含章节文件的文件夹")
+        if not dir_path:
+            return
+
+        try:
+            result = self._txt_import_service.import_volume_from_dir(dir_path, volume_id)
+            msg = f"成功导入 {result['success']} 个章节"
+            if result['skipped'] > 0:
+                msg += f"\n跳过 {result['skipped']} 个文件"
+            QMessageBox.information(self, "导入完成", msg)
+            self._reload_project_tree()
+        except Exception as e:
+            QMessageBox.critical(self, "导入失败", str(e))

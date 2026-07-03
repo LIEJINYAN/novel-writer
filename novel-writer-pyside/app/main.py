@@ -44,9 +44,14 @@ def main():
         logger.error("初始化失败，应用退出")
         sys.exit(1)
 
-    # 读取保存的主题，默认暗色
-    settings = QSettings("NovelWriter", "NovelWriter")
-    saved_theme = settings.value("theme", "dark")
+    # 读取保存的主题，默认暗色（优先 DB，回退 QSettings）
+    try:
+        from services.app_config_service import app_config_service
+        db_theme = app_config_service.get("theme")
+        saved_theme = db_theme if db_theme else \
+            QSettings("NovelWriter", "NovelWriter").value("theme", "dark")
+    except Exception:
+        saved_theme = QSettings("NovelWriter", "NovelWriter").value("theme", "dark")
     style_manager.apply_theme(app, saved_theme)
 
     # 创建并显示主窗口

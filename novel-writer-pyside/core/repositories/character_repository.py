@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import List
 
-from models.character import Character, ChapterAppearance
+from models import Character, ChapterAppearance
 from .base import BaseRepository
 
 

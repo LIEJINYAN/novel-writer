@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import List, Optional
 
-from models.chapter import Chapter, Volume
+from models import Volume, Chapter
 from .base import BaseRepository
 
 

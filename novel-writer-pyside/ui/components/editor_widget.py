@@ -102,6 +102,13 @@ class EditorWidget(QPlainTextEdit):
 
     # ---- 行号显示 ----
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self._line_number_area.setGeometry(
+            cr.left(), cr.top(), self.line_number_area_width(), cr.height()
+        )
+
     def _update_theme_colors(self):
         """根据当前主题更新行号区域颜色。"""
         is_dark = style_manager.current_theme == "dark"

@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import List, Optional
 
-from models.plot import PlotArc, PlotNode, PlotForeshadow
+from models import PlotArc, PlotNode, PlotForeshadow
 from .base import BaseRepository
 
 

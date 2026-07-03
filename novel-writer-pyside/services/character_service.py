@@ -10,9 +10,9 @@ class CharacterService:
 
     def create(self, project_id: int, **data) -> Character:
         """创建角色。"""
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
-            char = Character(project_id=project_id, **data)
+            char = Character(**data)
             session.add(char)
             session.commit()
             session.refresh(char)
@@ -22,7 +22,7 @@ class CharacterService:
 
     def get(self, character_id: int) -> Optional[Character]:
         """获取角色。"""
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             return session.query(Character).filter(
                 Character.id == character_id,
@@ -33,7 +33,7 @@ class CharacterService:
 
     def update(self, character_id: int, **data) -> Optional[Character]:
         """更新角色。"""
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             char = session.query(Character).filter_by(id=character_id).first()
             if not char:
@@ -49,7 +49,7 @@ class CharacterService:
 
     def delete(self, character_id: int) -> bool:
         """软删除角色。"""
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             char = session.query(Character).filter_by(id=character_id).first()
             if not char:
@@ -63,12 +63,11 @@ class CharacterService:
     def list(self, project_id: int, search: str = "",
              role_type: str = "", status: str = "") -> list[Character]:
         """列出角色，支持搜索和筛选。"""
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             query = session.query(Character).filter(
-                Character.project_id == project_id,
                 Character.is_deleted == 0
-            ).options(joinedload(Character.appearances))
+            )
             if search:
                 like = f"%{search}%"
                 query = query.filter(
@@ -85,7 +84,7 @@ class CharacterService:
     def add_appearance(self, character_id: int, chapter_id: int,
                        role: str = "次要", context: str = "") -> ChapterAppearance:
         """添加出场记录。"""
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             app = ChapterAppearance(
                 character_id=character_id,
@@ -102,12 +101,9 @@ class CharacterService:
 
     def get_appearances(self, character_id: int) -> list[dict]:
         """获取出场记录（含章节标题）。"""
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
-            from sqlalchemy.orm import joinedload
-            results = session.query(ChapterAppearance).options(
-                joinedload(ChapterAppearance.chapter)
-            ).filter(
+            results = session.query(ChapterAppearance).filter(
                 ChapterAppearance.character_id == character_id
             ).order_by(ChapterAppearance.id).all()
             return [
@@ -125,10 +121,9 @@ class CharacterService:
 
     def count(self, project_id: int) -> int:
         """统计角色数。"""
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             return session.query(Character).filter(
-                Character.project_id == project_id,
                 Character.is_deleted == 0
             ).count()
         finally:

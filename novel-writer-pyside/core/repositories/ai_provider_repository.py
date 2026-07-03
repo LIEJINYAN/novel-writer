@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import List, Optional
 
-from models.ai_provider import AIProvider
+from models import AIProvider
 from .base import BaseRepository
 
 

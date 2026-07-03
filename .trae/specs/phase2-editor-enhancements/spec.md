@@ -125,8 +125,8 @@
 - **Then**: 总字数等于所有章节字数之和，章节数准确，进度计算正确
 - **Verification**: `programmatic`
 
-## Open Questions
-- [ ] 搜索功能的入口在哪里？（建议：底部搜索栏 + Ctrl+F 快捷键）
-- [ ] 是否需要搜索历史记录？（建议：第一批不加）
-- [ ] 拖拽排序是否需要撤销功能？（建议：第一批不加，有确认提示即可）
-- [ ] 大纲面板是否需要点击跳转到对应章节？（建议：加，提升实用性）
+## ~~Open Questions~~ ✅ 全部已决策
+- [x] **搜索入口** → 编辑器右上方浮动搜索面板 + Ctrl+F 快捷键
+- [x] **搜索历史记录** → 已实现，持久化至 `search_history.json`，支持 ↑↓ 浏览
+- [x] **拖拽排序撤销** → 有确认提示 + Toast 撤销按钮 + `_undo_reorder` snapshot 机制
+- [x] **大纲面板跳转** → 已实现，`navigate_to_chapter` 连接 `_open_chapter_editor`

@@ -209,7 +209,7 @@
 - **Then**: API Key 以加密形式存储，不在任何日志中明文输出
 - **Verification**: `programmatic`
 
-## Open Questions
-- [ ] Ollama 适配器是用 httpx 直接调用还是用 ollama Python 包？（建议 httpx，减少依赖）
-- [ ] 续写时是否需要让用户选择续写字数？（建议第一批固定 2000 字，后续再做）
-- [ ] API Key 加密用 cryptography 库还是简单方案？（建议简单方案：base64 + 机器码，非高安全场景够用）
+## ~~Open Questions~~ ✅ 全部已决策
+- [x] **Ollama 适配器** → 使用 httpx 直接调用（无需 ollama Python 包）
+- [x] **续写字数选择** → 默认 2000 字，AIPanel 提供字数选择器（QComboBox 500-10000）
+- [x] **API Key 加密** → 使用 cryptography 库，`utils/crypto.py` 已实现

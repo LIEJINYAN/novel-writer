@@ -12,9 +12,9 @@ class PlotService:
 
     def create_arc(self, project_id: int, name: str,
                    description: str = "", sort_order: int = 0) -> PlotArc:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
-            arc = PlotArc(project_id=project_id, name=name,
+            arc = PlotArc(name=name,
                           description=description, sort_order=sort_order)
             session.add(arc)
             session.commit()
@@ -24,14 +24,14 @@ class PlotService:
             session.close()
 
     def get_arc(self, arc_id: int) -> Optional[PlotArc]:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             return session.query(PlotArc).filter_by(id=arc_id).first()
         finally:
             session.close()
 
     def update_arc(self, arc_id: int, **data) -> Optional[PlotArc]:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             arc = session.query(PlotArc).filter_by(id=arc_id).first()
             if not arc:
@@ -46,7 +46,7 @@ class PlotService:
             session.close()
 
     def delete_arc(self, arc_id: int) -> bool:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             arc = session.query(PlotArc).filter_by(id=arc_id).first()
             if not arc:
@@ -58,9 +58,9 @@ class PlotService:
             session.close()
 
     def list_arcs(self, project_id: int) -> list[PlotArc]:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
-            return session.query(PlotArc).filter_by(project_id=project_id)\
+            return session.query(PlotArc)\
                 .order_by(PlotArc.sort_order).all()
         finally:
             session.close()
@@ -69,9 +69,9 @@ class PlotService:
 
     def create_node(self, project_id: int, title: str,
                     arc_id: Optional[int] = None, **data) -> PlotNode:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
-            node = PlotNode(project_id=project_id, title=title,
+            node = PlotNode(title=title,
                             arc_id=arc_id, **data)
             session.add(node)
             session.commit()
@@ -81,14 +81,14 @@ class PlotService:
             session.close()
 
     def get_node(self, node_id: int) -> Optional[PlotNode]:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             return session.query(PlotNode).filter_by(id=node_id).first()
         finally:
             session.close()
 
     def update_node(self, node_id: int, **data) -> Optional[PlotNode]:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             node = session.query(PlotNode).filter_by(id=node_id).first()
             if not node:
@@ -103,7 +103,7 @@ class PlotService:
             session.close()
 
     def delete_node(self, node_id: int) -> bool:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             node = session.query(PlotNode).filter_by(id=node_id).first()
             if not node:
@@ -116,10 +116,9 @@ class PlotService:
 
     def list_nodes(self, project_id: int, arc_id: Optional[int] = None,
                    status: Optional[str] = None) -> list[PlotNode]:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
-            query = session.query(PlotNode).filter_by(project_id=project_id)\
-                .options(joinedload(PlotNode.chapter))
+            query = session.query(PlotNode)
             if arc_id is not None:
                 query = query.filter(PlotNode.arc_id == arc_id)
             if status:
@@ -140,10 +139,10 @@ class PlotService:
     def create_foreshadow(self, project_id: int, node_id: int,
                           description: str = "",
                           target_node_id: Optional[int] = None) -> PlotForeshadow:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             fs = PlotForeshadow(
-                project_id=project_id, node_id=node_id,
+                node_id=node_id,
                 description=description, target_node_id=target_node_id,
             )
             session.add(fs)
@@ -154,14 +153,14 @@ class PlotService:
             session.close()
 
     def get_foreshadow(self, foreshadow_id: int) -> Optional[PlotForeshadow]:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             return session.query(PlotForeshadow).filter_by(id=foreshadow_id).first()
         finally:
             session.close()
 
     def update_foreshadow(self, foreshadow_id: int, **data) -> Optional[PlotForeshadow]:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             fs = session.query(PlotForeshadow).filter_by(id=foreshadow_id).first()
             if not fs:
@@ -176,7 +175,7 @@ class PlotService:
             session.close()
 
     def delete_foreshadow(self, foreshadow_id: int) -> bool:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             fs = session.query(PlotForeshadow).filter_by(id=foreshadow_id).first()
             if not fs:
@@ -188,10 +187,10 @@ class PlotService:
             session.close()
 
     def list_foreshadows(self, node_id: int) -> list[PlotForeshadow]:
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             return session.query(PlotForeshadow).filter_by(node_id=node_id)\
-                .options(joinedload(PlotForeshadow.target_node)).all()
+                .all()
         finally:
             session.close()
 

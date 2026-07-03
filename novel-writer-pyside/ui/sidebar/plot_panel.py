@@ -9,7 +9,7 @@ from PySide6.QtGui import QFont, QBrush, QColor
 
 from services.plot_service import plot_service
 from utils.signal_bus import signal_bus
-from models.plot import PlotArc, PlotNode
+from models import PlotArc, PlotNode
 
 
 class PlotPanel(QWidget):

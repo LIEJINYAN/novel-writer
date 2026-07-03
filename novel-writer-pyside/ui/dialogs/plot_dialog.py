@@ -11,7 +11,7 @@ from PySide6.QtGui import QFont
 
 from services.plot_service import plot_service
 from services.chapter_service import ChapterService
-from models.plot import PlotNode
+from models import PlotNode
 
 
 class PlotDialog(QDialog):
