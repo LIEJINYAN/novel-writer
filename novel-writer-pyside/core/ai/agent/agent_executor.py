@@ -163,7 +163,8 @@ class AgentExecutor:
             # 解析参数
             params = {}
             # 匹配 key="value" | key=123 | key=3.14 | key=true | key=value
-            param_pattern = r'(\w+)\s*=\s*"([^"]*)"|(\w+)\s*=\s*(\d+\.?\d*)|(\w+)\s*=\s*(true|false)|(\w+)\s*=\s*(\w+)'
+            bool_pattern = r'[Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]'
+            param_pattern = rf'(\w+)\s*=\s*"([^"]*)"|(\w+)\s*=\s*(\d+\.?\d*)|(\w+)\s*=\s*({bool_pattern})|(\w+)\s*=\s*(\w+)'
             for pm in re.finditer(param_pattern, params_str):
                 if pm.group(1) and pm.group(2):
                     key, val = pm.group(1), pm.group(2)
