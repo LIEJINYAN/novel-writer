@@ -173,23 +173,20 @@ class PlotDialog(QDialog):
         if not self._node:
             return
 
-        self.title_edit.setText(self._node.title)
+        self.title_edit.setText(self._node.name)
         self.description_edit.setPlainText(self._node.description)
 
-        if self._node.arc_id:
-            idx = self.arc_combo.findData(self._node.arc_id)
+        if self._node.parent_id:
+            idx = self.arc_combo.findData(self._node.parent_id)
             if idx >= 0:
                 self.arc_combo.setCurrentIndex(idx)
 
         self.status_combo.setCurrentText(self._node.status)
 
-        if self._node.chapter_id:
-            idx = self.chapter_combo.findData(self._node.chapter_id)
+        if self._node.start_chapter:
+            idx = self.chapter_combo.findData(self._node.start_chapter)
             if idx >= 0:
                 self.chapter_combo.setCurrentIndex(idx)
-
-        self.importance_combo.setCurrentText(self._node.importance)
-        self.notes_edit.setPlainText(self._node.notes)
 
         self._load_foreshadows()
 
@@ -226,8 +223,8 @@ class PlotDialog(QDialog):
             self.foreshadow_table.setItem(row, 0, desc_item)
 
             target_title = ""
-            if fs.target_node:
-                target_title = fs.target_node.title
+            if fs.reveal_chapter_id:
+                target_title = f"第{fs.reveal_chapter_id}章"
             target_item = QTableWidgetItem(target_title)
             target_item.setFlags(target_item.flags() & ~Qt.ItemIsEditable)
             self.foreshadow_table.setItem(row, 1, target_item)
@@ -300,7 +297,7 @@ class PlotDialog(QDialog):
         all_nodes = plot_service.list_nodes(self._project_id)
         for node in all_nodes:
             if node.id != self._node_id:
-                target_combo.addItem(node.title, node.id)
+                target_combo.addItem(node.name, node.id)
         form_layout.addRow("揭示节点:", target_combo)
 
         status_combo = QComboBox()
@@ -320,8 +317,8 @@ class PlotDialog(QDialog):
             fs = plot_service.get_foreshadow(fs_id)
             if fs:
                 desc_edit.setPlainText(fs.description)
-                if fs.target_node_id:
-                    idx = target_combo.findData(fs.target_node_id)
+                if fs.reveal_chapter_id:
+                    idx = target_combo.findData(fs.reveal_chapter_id)
                     if idx >= 0:
                         target_combo.setCurrentIndex(idx)
                 status_combo.setCurrentText(fs.status)
@@ -360,13 +357,11 @@ class PlotDialog(QDialog):
         chapter_id = self.chapter_combo.currentData()
 
         data = {
-            "title": title,
+            "name": title,
             "description": self.description_edit.toPlainText().strip(),
-            "arc_id": arc_id,
+            "parent_id": arc_id,
             "status": self.status_combo.currentText(),
-            "chapter_id": chapter_id,
-            "importance": self.importance_combo.currentText(),
-            "notes": self.notes_edit.toPlainText().strip(),
+            "start_chapter": chapter_id,
         }
 
         if self._node_id:

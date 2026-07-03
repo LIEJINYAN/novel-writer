@@ -227,7 +227,7 @@ class PlotPanel(QWidget):
 
         reply = QMessageBox.warning(
             self, "确认删除",
-            f"确定要删除节点「{node.title}」吗？\n此操作不可撤销。",
+            f"确定要删除节点「{node.name}」吗？\n此操作不可撤销。",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -258,12 +258,12 @@ class PlotPanel(QWidget):
             nodes = plot_service.list_nodes(self._project_id, arc_id=arc.id)
 
             for node in nodes:
-                if search and search not in node.title.lower():
+                if search and search not in node.name.lower():
                     continue
 
                 has_items = True
 
-                node_item = QTreeWidgetItem([node.title])
+                node_item = QTreeWidgetItem([node.name])
                 node_item.setData(0, Qt.UserRole, ("node", node.id))
 
                 status_color = self._get_status_color(node.status)
@@ -272,7 +272,7 @@ class PlotPanel(QWidget):
                 chapter_info = ""
                 if node.chapter:
                     chapter_info = f" (第{node.chapter.chapter_number}章)"
-                node_item.setText(0, f"{node.title}{chapter_info}")
+                node_item.setText(0, f"{node.name}{chapter_info}")
 
                 arc_item.addChild(node_item)
 

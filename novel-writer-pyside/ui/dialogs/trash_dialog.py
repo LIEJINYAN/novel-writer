@@ -157,15 +157,8 @@ class TrashDialog(QDialog):
         self._vol_table.setRowCount(len(volumes))
         for row, v in enumerate(volumes):
             self._vol_table.setItem(row, 0, QTableWidgetItem(str(v.id)))
-            self._vol_table.setItem(row, 1, QTableWidgetItem(v.name))
-            # 所属项目
-            session = db_manager.get_session()
-            try:
-                proj = session.query(Project).filter_by(id=v.project_id).first()
-                pname = proj.name if proj else f"(项目 {v.project_id})"
-            finally:
-                session.close()
-            self._vol_table.setItem(row, 2, QTableWidgetItem(pname))
+            self._vol_table.setItem(row, 1, QTableWidgetItem(v.title))
+            self._vol_table.setItem(row, 2, QTableWidgetItem("—"))
             deleted_at = v.deleted_at.strftime("%Y-%m-%d %H:%M") if v.deleted_at else ""
             self._vol_table.setItem(row, 3, QTableWidgetItem(deleted_at))
         self._tabs.setTabText(self.TAB_VOLUME, f"已删除的分卷 ({len(volumes)})")
@@ -184,10 +177,7 @@ class TrashDialog(QDialog):
                 vol = session.query(Volume).filter_by(id=ch.volume_id).first()
                 vname = vol.name if vol else f"(分卷 {ch.volume_id})"
                 self._ch_table.setItem(row, 2, QTableWidgetItem(vname))
-                # 所属项目名
-                proj = session.query(Project).filter_by(id=ch.project_id).first()
-                pname = proj.name if proj else f"(项目 {ch.project_id})"
-                self._ch_table.setItem(row, 3, QTableWidgetItem(pname))
+                self._ch_table.setItem(row, 3, QTableWidgetItem("—"))
                 deleted_at = ch.deleted_at.strftime("%Y-%m-%d %H:%M") if ch.deleted_at else ""
                 self._ch_table.setItem(row, 4, QTableWidgetItem(deleted_at))
         finally:

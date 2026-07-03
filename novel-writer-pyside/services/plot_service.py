@@ -71,8 +71,8 @@ class PlotService:
                     arc_id: Optional[int] = None, **data) -> PlotNode:
         session = db_manager.get_project_session()
         try:
-            node = PlotNode(title=title,
-                            arc_id=arc_id, **data)
+            node = PlotNode(name=title,
+                            parent_id=arc_id, **data)
             session.add(node)
             session.commit()
             session.refresh(node)
@@ -93,6 +93,9 @@ class PlotService:
             node = session.query(PlotNode).filter_by(id=node_id).first()
             if not node:
                 return None
+            # 兼容旧字段名
+            if "title" in data:
+                data["name"] = data.pop("title")
             for key, value in data.items():
                 if hasattr(node, key):
                     setattr(node, key, value)
@@ -120,7 +123,7 @@ class PlotService:
         try:
             query = session.query(PlotNode)
             if arc_id is not None:
-                query = query.filter(PlotNode.arc_id == arc_id)
+                query = query.filter(PlotNode.parent_id == arc_id)
             if status:
                 query = query.filter(PlotNode.status == status)
             return query.order_by(PlotNode.sort_order).all()

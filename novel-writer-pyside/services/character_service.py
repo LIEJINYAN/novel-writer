@@ -12,6 +12,9 @@ class CharacterService:
         """创建角色。"""
         session = db_manager.get_project_session()
         try:
+            # 兼容旧字段名映射
+            if "role_type" in data:
+                data["role"] = data.pop("role_type")
             char = Character(**data)
             session.add(char)
             session.commit()
@@ -38,6 +41,9 @@ class CharacterService:
             char = session.query(Character).filter_by(id=character_id).first()
             if not char:
                 return None
+            # 兼容旧字段名
+            if "role_type" in data:
+                data["role"] = data.pop("role_type")
             for key, value in data.items():
                 if hasattr(char, key):
                     setattr(char, key, value)

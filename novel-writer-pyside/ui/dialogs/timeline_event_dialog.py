@@ -69,10 +69,9 @@ class TimelineEventDialog(QDialog):
 
     def _load_chapters(self):
         """加载项目章节。"""
-        session = db_manager.get_session()
+        session = db_manager.get_project_session()
         try:
             chapters = session.query(Chapter).filter(
-                Chapter.project_id == self._project_id,
                 Chapter.is_deleted == 0,
             ).order_by(Chapter.chapter_number).all()
             for ch in chapters:

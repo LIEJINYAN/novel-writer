@@ -57,15 +57,10 @@ class CharacterItemWidget(QWidget):
         sub_info_layout = QHBoxLayout()
         sub_info_layout.setSpacing(8)
 
-        role_label = QLabel(self._character.role_type or "未设定")
+        role_label = QLabel(self._character.role or "未设定")
         role_label.setObjectName("character_role")
         role_label.setStyleSheet("font-size: 11px; color: #666;")
         sub_info_layout.addWidget(role_label)
-
-        status_label = QLabel(self._character.status or "")
-        status_label.setObjectName("character_status")
-        status_label.setStyleSheet("font-size: 11px; color: #888;")
-        sub_info_layout.addWidget(status_label)
 
         info_layout.addLayout(sub_info_layout)
 
@@ -265,14 +260,11 @@ class CharacterPanel(QWidget):
 
         search = self.search_input.text().strip()
         role_type = self.role_combo.currentText()
-        status = self.status_combo.currentText()
 
         if role_type == "全部类型":
             role_type = ""
-        if status == "全部状态":
-            status = ""
 
-        characters = character_service.list(self._project_id, search, role_type, status)
+        characters = character_service.list(self._project_id, search, role_type)
 
         self._clear_list()
 

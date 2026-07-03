@@ -235,5 +235,15 @@ class RelationshipService:
         finally:
             session.close()
 
+    def list_faction_members(self, faction_id: int) -> list[FactionMember]:
+        """列出派系成员。"""
+        session = db_manager.get_project_session()
+        try:
+            return session.query(FactionMember).filter(
+                FactionMember.faction_id == faction_id
+            ).order_by(FactionMember.sort_order).all()
+        finally:
+            session.close()
+
 
 relationship_service = RelationshipService()

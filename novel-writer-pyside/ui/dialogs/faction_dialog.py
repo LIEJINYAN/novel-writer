@@ -110,8 +110,10 @@ class FactionDialog(QDialog):
             self._status_combo.setCurrentIndex(status_idx)
 
         # 加载成员
-        for m in fac.members:
-            text = m.character.name if m.character else f"[ID:{m.character_id}]"
+        members = relationship_service.list_faction_members(fac.id)
+        for m in members:
+            char = character_service.get(m.character_id)
+            text = char.name if char else f"[ID:{m.character_id}]"
             item = QListWidgetItem(text)
             item.setData(256, m.character_id)
             self._member_list.addItem(item)

@@ -199,13 +199,11 @@ class CharacterDialog(QDialog):
         self.aliases_edit.setText(self._character.aliases)
         self.gender_combo.setCurrentText(self._character.gender)
         self.age_edit.setText(self._character.age)
-        self.role_type_combo.setCurrentText(self._character.role_type)
-        self.status_combo.setCurrentText(self._character.status)
+        self.role_type_combo.setCurrentText(self._character.role)
         self.personality_edit.setPlainText(self._character.personality)
         self.appearance_edit.setPlainText(self._character.appearance)
         self.background_edit.setPlainText(self._character.background)
-        self.arc_edit.setPlainText(self._character.arc)
-        self.notes_edit.setPlainText(self._character.notes)
+        self.arc_edit.setPlainText(self._character.character_arc)
 
         self._load_appearances()
 
@@ -241,13 +239,11 @@ class CharacterDialog(QDialog):
             "aliases": self.aliases_edit.text().strip(),
             "gender": self.gender_combo.currentText(),
             "age": self.age_edit.text().strip(),
-            "role_type": self.role_type_combo.currentText(),
+            "role": self.role_type_combo.currentText(),
             "personality": self.personality_edit.toPlainText().strip(),
             "appearance": self.appearance_edit.toPlainText().strip(),
             "background": self.background_edit.toPlainText().strip(),
             "arc": self.arc_edit.toPlainText().strip(),
-            "status": self.status_combo.currentText(),
-            "notes": self.notes_edit.toPlainText().strip(),
         }
 
         if self._character_id:
